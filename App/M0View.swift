@@ -79,6 +79,8 @@ struct M0View: View {
         in: 0...1
       ) { editing in
         isScrubbing = editing
+        // つまみを掴んだ瞬間に、現在位置から動き出すようにする。
+        if editing { scrubFraction = model.fraction }
         // 離したとき1回だけシークする。
         if !editing { model.seek(fraction: scrubFraction) }
       }

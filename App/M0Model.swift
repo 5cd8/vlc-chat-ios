@@ -45,7 +45,6 @@ final class M0Model {
   private(set) var libVLCVersion = "—"
 
   // 選択・再生
-  private(set) var lastEvent = "—"
   private(set) var pickSummary = "—"
   private(set) var playError: String?
   private(set) var bookmarkReports: [BookmarkReport] = []
@@ -253,7 +252,8 @@ final class M0Model {
 
   func sceneDidChange(isActive: Bool, name: String) {
     log.write("画面 \(name)")
-    if !isActive { UIApplication.shared.isIdleTimerDisabled = false }
+    // 前面に戻ったときは、再生中なら画面を消さない状態に戻す。
+    UIApplication.shared.isIdleTimerDisabled = isActive && player?.state == .playing
   }
 
   // MARK: - 内部
@@ -338,7 +338,6 @@ final class M0Model {
   }
 
   private func stateDidChange(_ state: PlayerState) {
-    lastEvent = "state=\(state)"
     log.write("状態 \(state)")
     UIApplication.shared.isIdleTimerDisabled = (state == .playing)
     if state == .playing {
