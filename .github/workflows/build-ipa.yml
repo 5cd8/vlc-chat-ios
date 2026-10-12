@@ -1,0 +1,91 @@
+name: build-ipa
+
+on:
+  push:
+    branches: [main, "feature/**"]
+    tags: ["m0-*"]
+
+env:
+  # ランナーイメージの更新で既定が変わり得るため、Xcodeを固定する。
+  XCODE_APP: /Applications/Xcode_26.6.app
+
+jobs:
+  test:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - run: sudo xcode-select -s "$XCODE_APP"
+      - run: swift --version
+      - run: swift test --package-path Packages/VLCChatCore
+
+  build:
+    needs: test
+    runs-on: macos-26
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Xcodeを固定する
+        run: |
+          sudo xcode-select -s "$XCODE_APP"
+          xcodebuild -version
+          swift --version
+      - name: XcodeGen と ldid を入れる
+        run: HOMEBREW_NO_AUTO_UPDATE=1 brew install xcodegen ldid
+      # xcframeworkが約382MBあるのでキャッシュは必須。タグ m0-* の実行は featureブランチの
+      # キャッシュを復元できない可能性が高く、その場合は毎回取り直す（動作は壊れない）。
+      - name: SwiftPMのキャッシュを復元する
+        id: cache
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            build/SourcePackages
+          key: ${{ runner.os }}-xcode26.6-${{ hashFiles('project.yml') }}
+      - run: xcodegen generate
+      - name: パッケージを解決する
+        id: resolve
+        run: xcodebuild -resolvePackageDependencies -project VLCWithChat.xcodeproj -clonedSourcePackagesDirPath build/SourcePackages
+      - run: bash scripts/make-ipa.sh
+      # actions/cache 単体はジョブ成功時にしか保存しないので、restore と save に分ける。
+      - name: SwiftPMのキャッシュを保存する
+        if: always() && steps.cache.outputs.cache-hit != 'true' && steps.resolve.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            build/SourcePackages
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ipa
+          path: |
+            build/vlc-with-chat-unsigned.ipa
+            build/vlc-with-chat-fakesigned.ipa
+            build/xcodebuild.log
+          if-no-files-found: warn
+      - name: Releaseを作る
+        if: startsWith(github.ref, 'refs/tags/m0-')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            build/vlc-with-chat-unsigned.ipa \
+            build/vlc-with-chat-fakesigned.ipa \
+            licenses/LGPL-2.1.txt \
+            --prerelease \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file - <<'NOTES'
+          M0（実現性の確認）用のビルドです。iPhone実機での確認用で、一般向けの配布ではありません。
+
+          - vlc-with-chat-unsigned.ipa: 署名なし。SideStoreで取り込んで署名します。
+          - vlc-with-chat-fakesigned.ipa: 同じビルドに `ldid -S` で偽署名をかけたもの。unsigned が取り込めないときの代替です。
+
+          ## ライセンス（LGPL）
+          このアプリは libVLC（LGPL-2.1以上）を静的リンクした SwiftVLC を含みます。LGPL-2.1の全文は、このReleaseの `LGPL-2.1.txt` です。
+
+          - SwiftVLC（MIT）: https://github.com/harflabs/SwiftVLC （使用版 1.1.0-beta.14）
+          - libVLC のソース: https://code.videolan.org/videolan/vlc （SwiftVLC が同梱するxcframeworkのビルド手順は、上記リポジトリにあります）
+          - 再ビルドの手順: このリポジトリの `.github/workflows/build-ipa.yml` と `scripts/make-ipa.sh`
+          NOTES
