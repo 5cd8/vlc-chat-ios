@@ -52,7 +52,7 @@ Issueの「M0」の4項目を確かめる。判断基準もIssueの通り（1と
 | XcodeGen（`project.yml` から `.xcodeproj` を生成）は、macOSランナーに `brew install xcodegen` で入れられる。署名なしipaは、`xcodebuild archive ... CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO AD_HOC_CODE_SIGNING_ALLOWED=YES` の後、`xcarchive/Products/Applications/X.app` を `Payload/` に入れて `zip` する。`-exportArchive` は署名が要るので使わない。SideStore自身のMakefileが実例 | https://github.com/SideStore/SideStore/blob/develop/Makefile （170〜200行付近）。XcodeGenは https://github.com/yonaskolb/XcodeGen |
 | GitHub Actionsのパブリックリポジトリでは、macOSの標準ランナーも無料。`macos-26`（Apple Silicon）にXcode 26.0.1〜26.6が入っている（既定は26.6、iOS SDK 26.5） | https://docs.github.com/en/billing/concepts/product-billing/github-actions 、https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md |
 | ユーザーが選んだ巨大な動画は、`UIDocumentPickerViewController(forOpeningContentTypes:asCopy: false)` でコピーせずに開ける。得たURLはセキュリティスコープ付きで、`startAccessingSecurityScopedResource()` と `stopAccessingSecurityScopedResource()` を対にする。ブックマークは、アクセス中に `bookmarkData(options:...)` で作り、`URL(resolvingBookmarkData:bookmarkDataIsStale:)` で解決する。**iOSで使うオプション（`.minimalBookmark` か）は、Appleのサンプルを見ても確定できていない** | https://developer.apple.com/documentation/uikit/uidocumentpickerviewcontroller 、https://developer.apple.com/documentation/uikit/providing-access-to-directories |
-| SideStore：無料のApple IDで、署名7日・同時3アプリ・1週間にApp ID 10個。最近の安定版0.6.4にはサインインの障害の注記があり、修正版は0.7.0-alpha。iOS 26.7では更新の不具合が未解決との報告。署名なしipaを直接受け付けるかは、公式文書に記載が無い（AltStore由来の挙動としては知られている）。初回セットアップ（Windows）：iTunes・iloader・LocalDevVPN | https://docs.sidestore.io/docs/faq 、https://github.com/SideStore/SideStore/releases 、SideStore-Docs（`docs/installation/*`・`docs/troubleshooting/*`）。**サブエージェントの報告による。実装前に、最新の公式文書で確かめる** |
+| SideStore：無料のApple IDで、署名7日・同時3アプリ・1週間にApp ID 10個。**0.6.4は「DO NOT USE」（サインイン不能）。最新は0.7.0-alpha（サインインの503を修正）**。0.6.3のノートに「iOS 26.4以降でVPNエラーが出たらiloaderで再インストール」とある。署名なしipaを直接受け付けるかは、FAQ・前提条件のページに記載が無い（「アプリに改変は要らない」「個人の開発証明書で再署名する」とだけある）。無料のApple IDの制限（署名7日はバックグラウンドで更新、同時3アプリ、週にApp ID 10個）はFAQで再確認済み。初回セットアップ（Windows 8以降・64bit、Wi-Fi必須）：LocalDevVPN（iPhone）→iTunes→iloader。インストール・更新のたびにVPNをオンにする | https://docs.sidestore.io/docs/faq 、https://docs.sidestore.io/docs/installation/prerequisites 、https://github.com/SideStore/SideStore/releases （いずれも2026-10-12に取得して確認）。バックグラウンドモード・PiPのentitlementは公式文書に記載が無く、実機で確かめる |
 
 ## 3. 未確認事項（M0の実機で必ず確かめる。計画の前提にしない）
 
@@ -63,7 +63,7 @@ Issueの「M0」の4項目を確かめる。判断基準もIssueの通り（1と
 | U3 | SwiftVLCでMKV（VP9/AV1+Opus、H.264+AAC）が映像つきで再生できるか。上流 #250（映像が出ない）が起きるか | チェック2（A） | VLCKit 4 → 3.7.4 の順に戻る |
 | U4 | `.timeChanged` の間隔がチャット同期に足りるか | チェック2（C） | 補間（最後の通知時刻＋経過×rate）を本実装で入れる |
 | U5 | `fileImporter` のURLが、コピーされずに開かれるか。ブックマークの再解決 | チェック2（D・E） | `asCopy: false` を使う `UIDocumentPickerViewController` を直接ラップする |
-| U6 | 無料のApple IDで署名して、PiPが起動するか | チェック3 | PiPを諦める（Issueの判断基準） |
+| U6 | 無料のApple IDで署名して、PiPが起動するか | チェック3 | 諦めない。原因（署名／ライブラリ）を切り分けて相談（ユーザーの決定） |
 | U7 | 画面ロック中に音声が続くか。SwiftVLCの音声セッションの方針2つで違うか | チェック4 | バックグラウンド音声を仕様から外す（Issueの判断基準） |
 
 ## 4. 設計
@@ -155,7 +155,7 @@ ipaは、GitHub Releases の `m0-<n>` のページ（`https://github.com/5cd8/vl
 |---|---|---|---|
 | D1 | M0をトレーサー弾にする（骨組みを本実装に引き継ぐ） | CI・署名なしipa・SwiftVLCの導入は、本実装で必ず要る。使い捨てにすると二度手間 | 使い捨てのスパイク（PWAのPhase 0と同じ）。画面とロジックは作り直すので、M0では小さく作る |
 | D2 | XcodeGenで `.xcodeproj` を生成し、コミットしない | Macが無く、`.xcodeproj` を手で保守できない。`project.yml` はテキストで、私が書ける | `.xcodeproj` をコミット（手で直せない）、Swift Playgrounds形式（`xcodebuild` でのCIが標準でない） |
-| D3 | SwiftVLCは `1.1.0-beta.14` を固定 | `.applicationManaged`（G）が安定版に無い（grepで確認）。シークの修正が入っている。**Issueの「M0は安定版 v1.0.0 で始める」とは食い違うため、ユーザーの確認待ち（12節）** | v1.0.0（Issueの記載通り。Gの2つ目の方針を試せない。外れたときの戻り先として残す） |
+| D3 | SwiftVLCは `1.1.0-beta.14` を固定（ユーザー決定。12節） | `.applicationManaged`（G）が安定版に無い（grepで確認）。シークの修正が入っている | v1.0.0（Issueの記載通り。Gの2つ目の方針を試せない。外れたときの戻り先として残す） |
 | D4 | アプリのSwift言語モードは5 | ローカルでコンパイルできず、strict concurrencyの修正でCI往復が増える | Swift 6（M1で移行を検討） |
 | D5 | `fileImporter` に `[.item]` を渡す（拡張子で絞らない） | MKVなどに対応するUTIがiOSに無い可能性があり、絞ると選べない。PWAでも `accept` を付けない判断をした | `.movie` などで絞る |
 | D6 | ロジックのPackageは `SwiftVLC` に依存させない | libVLCのコピーが2つできると未定義動作（IntegrationTopology） | PackageからSwiftVLCを使う（本実装でも、アプリ本体だけが依存する） |
@@ -165,12 +165,14 @@ ipaは、GitHub Releases の `m0-<n>` のページ（`https://github.com/5cd8/vl
 
 - **コンパイルの往復**：書いたSwiftが、CIで何度も落ちる可能性が高い（ローカルにコンパイラが無い）。SwiftVLCの宣言をタグのソースで確かめ、小さく作って、push→CIを素早く回す。
 - **SwiftVLCは若く、メンテナは実質1人**。ベータを固定するので、不具合は自分で回避する必要がある。
-- **SideStoreの不安定さ**：iOS 26での更新・サインインの障害が報告されている。チェック1が外れたときの代替（AltStore）を用意しておく。
+- **SideStoreの不安定さ**：0.6.4はサインイン不能で、0.7.0-alphaを使う必要がある（アルファ版）。iOS 26.4以降のVPNエラーの報告もある。チェック1が外れたときの代替（AltStore）を用意しておく。
 - **画面ロック中の音声**：SwiftVLCの既定では、PiPなしのロックで一時停止する可能性が高い（2節）。外れたら、本実装でバックグラウンド音声を仕様から外す（Issueの判断基準）。
-- **PiPの無料署名での可否**：未確認。外れたらPiPを諦める（Issueの判断基準）。
+- **PiPの無料署名での可否**：未確認。**外れても諦めずに原因を切り分ける**（ユーザーの決定。署名の制限かライブラリの実装かを調べ、結果を持って改めて相談する）。PiPが有効だとロック中も音声が続くため、バックグラウンド音声の見込みにも直結する。
 - **ブックマークのオプション**：iOSで正しい値が確定できていない。実機で `.minimalBookmark` と `[]` を試す。
 - M0の結果が、Issueの前提（SwiftVLC・SideStore）を変える場合は、計画を作り直す（ステップ2〜4に戻る）。
 
-## 12. ユーザーに確認が要る点
+## 12. 確定した事項（ユーザーの決定。2026-10-12）
 
-- **SwiftVLCの版**：Issue本文は「M0は安定版 v1.0.0 で始める」「一時停止中のシークが不安定ならベータに上げる」とするが、画面ロック中の音声（チェック4）で `.applicationManaged` を試すにはベータが要る。本計画は beta.14 を既定にした。Issueの記載（v1.0.0から始める）に合わせるか、本計画（beta.14）で進めるかを決めてもらう。決まり次第、Issueの記述と本計画をそろえる。
+- SwiftVLCは **1.1.0-beta.14** で始める（Issueの「M0は安定版 v1.0.0 で始める」は更新する）。
+- PiPは、チェック3が外れても**諦めない**。原因を切り分けて相談する（Issueの判断基準は更新する）。
+- SideStore周りの情報は、最新の公式文書で確認する（2節に反映済み。署名なしipaの直接取り込みだけは、文書に記載が無く、チェック1で確かめる）。
