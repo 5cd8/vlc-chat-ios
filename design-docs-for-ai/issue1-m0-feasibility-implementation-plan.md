@@ -59,11 +59,14 @@ Issueの「M0」の4項目を確かめる。判断基準もIssueの通り（1と
 
 | ID | 未確認事項 | 確かめ方 | 外れたとき |
 |---|---|---|---|
-| U1 | 署名なしipaを、SideStoreがそのまま取り込み、署名してインストールできるか（SideStoreの公式文書に記載が無い） | 8節 チェック1 | まず `ldid -S` で偽署名したipa（SideStore自身のMakefileが `Payload` に詰める前にしている手順）を試す。それでも外れたら、署名方式の相談（年$99のApple Developer Program、AltStoreなど） |
+| （B） | 一時停止中のシークが安定するか | チェック2 | v1.0.0に下げて比べる（4.1節） |
+| （F） | 1時間再生してメモリが増え続けないか | チェック2 | 増える場合は、原因（libVLCのキャッシュ設定、ファイル読み込み）を調べて相談 |
+| （H） | 4KのAV1/VP9が実用速度か | チェック2 | 実用でなければ、対応する解像度・コーデックの範囲を相談 |
+| U1 | 署名なしipaを、SideStoreがそのまま取り込み、署名してインストールできるか（SideStoreの公式文書に記載が無い） | 8節 チェック1 | まず、同じビルドで一緒に作った偽署名のipa（`ldid -S`。SideStore自身のMakefileの手順）を試す。それでも外れたら、署名方式の相談（年$99のApple Developer Program、AltStoreなど） |
 | U2 | CIが、SwiftVLC（xcframework約382MB）つきのiOSアプリを、`macos-26` でビルドできるか。Swift 6.3 / Xcode 26.4以降の要件を満たすか | 6節（push後のCI） | Xcodeのバージョン固定、SwiftVLCの版の変更（1.0.0⇔ベータ） |
 | U3 | SwiftVLCでMKV（VP9/AV1+Opus、H.264+AAC）が映像つきで再生できるか。上流 #250（映像が出ない）が起きるか | チェック2（A） | VLCKit 4.0.0-a25 → 3.7.4 の順に戻る |
 | U4 | `.timeChanged` の間隔がチャット同期に足りるか | チェック2（C） | 補間（最後の通知時刻＋経過×rate）を本実装で入れる |
-| U5 | `fileImporter` のURLが、コピーされずに開かれるか。ブックマークの再解決 | チェック2（D・E） | `asCopy: false` を使う `UIDocumentPickerViewController` を直接ラップする |
+| U5 | `fileImporter` と `UIDocumentPickerViewController(asCopy: false)`（どちらもM0の画面に置く）のURLが、コピーされずに開かれるか。ブックマークの再解決 | チェック2（D・E） | 開かれない方式は本実装で使わない。両方外れたら、ファイルの取り込み方を相談する |
 | U6 | 無料のApple IDで署名して、PiPが起動するか | チェック3 | 諦めない。原因（署名／ライブラリ）を切り分けて相談（ユーザーの決定） |
 | U7 | 画面ロック中に音声が続くか。SwiftVLCの音声セッションの方針2つで違うか。**合格基準：「アプリ管理(a)」か「PiP中(b)（どちらの方針でも）」のどちらかで音声が続けば、4は通ったとする。ライブラリ管理(a)（PiPなしでロック）の停止は、ソース上の設計どおりで、外れではない** | チェック4 | バックグラウンド音声を仕様から外す（Issueの判断基準） |
 
@@ -72,8 +75,8 @@ Issueの「M0」の4項目を確かめる。判断基準もIssueの通り（1と
 ### 4.1 構成と方針
 
 - **アプリ**：Swift / SwiftUI、iOS 18以降、iPhoneのみ、縦のみ。Bundle ID `com.5cd8.vlcchatios`、表示名 `vlc-with-chat`、プロダクト名 `VLCWithChat`。
-- **プロジェクト生成**：`project.yml`（XcodeGen）を置き、CIで `xcodegen generate` して `VLCWithChat.xcodeproj` を作る。**`.xcodeproj` はコミットしない**（`.gitignore`）。Macが無く `.xcodeproj` を手で保守できないため。
-- **SwiftVLCの版**：M0は **`1.1.0-beta.14` を `exactVersion` で固定**する。理由：(1) `.applicationManaged`（G）が、安定版 v1.0.0 には無い。(2) 一時停止中のシークなどの修正（`beta.12`〜`14`）が入っている。ビルドが通らない・動かない場合に限り、`1.0.0` に下げて、`.applicationManaged` なしで確認する（判断の理由は本書10節に書く）。
+- **プロジェクト生成**：`project.yml`（XcodeGen）を置き、CIで `xcodegen generate` して `VLCWithChat.xcodeproj` を作る。**`.xcodeproj` はコミットしない**（`.gitignore`。`project.yml` の先頭に `name: VLCWithChat`）。Macが無く `.xcodeproj` を手で保守できないため。
+- **SwiftVLCの版**：M0は **`1.1.0-beta.14` を `exactVersion` で固定**する。理由：(1) `.applicationManaged`（G）が、安定版 v1.0.0 には無い。(2) 一時停止中のシークなどの修正（`beta.12`〜`14`）が入っている。下げる条件は、(a) ビルドが通らない・動かない、(b) チェック2のB（一時停止中のシーク）が外れた、のとき（Issueと同じ。比べるために `1.0.0` でも試す）。**`1.0.0` に下げると使えなくなるもの**：`VLCInstance(appleAudioSessionPolicy:)`（Gの2つ目の方針）、`PiPController.requestStart()`・`toggleReportingStartResult()`・`PiPStartResult`・`pipEventEnvelopes`（PiPの結果表示は `start()` と `isPossible`／`isActive` で代用する）。下げるときは、画面・モデルの該当部分を書き換えて対応する（判断の理由は本書10節に書く）。
 - **Swift言語モードは5**（`SWIFT_VERSION: 5.0`）。Swift 6のstrict concurrencyは、ローカルでコンパイルできない状況ではCI往復を増やすだけなので、M0は5で始め、M1で6への移行を検討する。SwiftVLCのパッケージ自体はSwift 6モードでコンパイルされる（アプリの設定とは独立）。
 - **ロジックのSwift Package**：`Packages/VLCChatCore`（`SwiftVLC` に**依存させない**）。M0では、実機計測の集計 `IntervalStats` だけを入れ、Swift Testingで単体テストする。目的は、本実装で使う「ロジックをPackageに分け、CIで `swift test` する」仕組みを、M0で通しておくこと。
 - **project.yml の要点**（XcodeGenの `ProjectSpec.md` で確認）：
@@ -89,8 +92,8 @@ Issueの「M0」の4項目を確かめる。判断基準もIssueの通り（1と
 
 縦に、上=動画（`PiPVideoView`。幅いっぱい、16:9）、中=操作、下=情報パネル（スクロール）。装飾は最小限でよい。
 
-- **ファイルを選択**ボタン：`.fileImporter(isPresented:allowedContentTypes:[.item]...)`（拡張子での絞り込みはしない。MKVのUTIを当てにしない）。選ばれたURLについて、`startAccessingSecurityScopedResource()` を呼び、**再生が終わる・別のファイルを選ぶまで保持する**。選択直後に、`url.path`、ファイルサイズ、選択に要した時間をログへ出す（D）。
-- **再生操作**：再生/一時停止（`togglePlayPause()`）、10秒戻る・進む（`seek(by:)` または `jump(by:)`）、シークバー（`Slider`。離したとき1回だけ `seek(to: PlaybackPosition)`）、再生速度（0.5・1.0・2.0のボタン。`setPlaybackRate`）。
+- **ファイルを選択**ボタン：`.fileImporter(isPresented:allowedContentTypes:[.item]...)`（拡張子での絞り込みはしない。MKVのUTIを当てにしない）。選ばれたURLについて、`startAccessingSecurityScopedResource()` を呼び、**再生が終わる・別のファイルを選ぶまで保持する**。選択直後に、`url.path`、ファイルサイズ、選択に要した時間（ピッカーのコールバックが返ってから、`play(url:)` 後に `.playing` になるまで。ユーザーがピッカーを操作する時間は含めない）をログへ出す（D）。
+- **再生操作**：再生/一時停止（`togglePlayPause()`）、10秒戻る・進む（`jump(by: .seconds(±10))`。戻り値 `Bool` をログに出す）、シークバー（`Slider`。離したとき1回だけ `seek(to: PlaybackPosition)`）、再生速度（0.5・1.0・2.0のボタン。`setPlaybackRate`）。
 - **PiP**：`PiPVideoView(player, controller: $pip)` を使い、「PiP開始」ボタン（`pip?.toggleReportingStartResult()` または `requestStart() -> PiPStartResult`（`.accepted`・`.noMedia`・`.notPossible`・`.backendUnavailable`）で**結果を画面とログに出す**。`toggle()`・`start()` は結果を捨てるため、チェック3が外れたときの切り分けの材料にならない。非同期の失敗は `pipEventEnvelopes` で拾う）、`isPossible`・`isActive` の表示。`startsAutomaticallyFromInline` は既定の `true`（ホームへ戻ると自動でPiPになるかも見る）。
 - **音声セッションの方針**：「ライブラリ管理／アプリ管理」の切り替え（`UserDefaults` に保存し、**次の起動から**有効。`appleAudioSessionPolicy` は `VLCInstance` の不変の属性のため）。ライブラリ管理は `VLCInstance.shared`、アプリ管理は `try VLCInstance(appleAudioSessionPolicy: .applicationManaged)` を作り、どちらも `Player(instance:)` に渡す（インスタンスはプロセスで1つだけ作る）。アプリ管理のときは、アプリが `AVAudioSession` を `.playback`・`.moviePlayback` にして、**`play(url:)` の前に** `setActive(true)` する（アプリ管理ではSwiftVLCが有効化しない）。`Media.parse(timeout:instance:)` などは `instance` の既定が `.shared` なので、使う場合は必ずインスタンスを明示する。
 - **ブックマーク**：選択に成功したら、ブックマークデータを `UserDefaults` に保存する（オプションは `.minimalBookmark` を第一候補に試し、失敗したら `[]`）。「ブックマークから再生」ボタンで、保存したデータを解決して再生する。`isStale` の結果、解決したパス、`startAccessing...` の戻り値を表示する（E）。
@@ -129,14 +132,14 @@ vlc-chat-ios/
 ## 6. CI（`.github/workflows/build-ipa.yml`）
 
 - **トリガー**：`push`（`main`・`feature/**`のブランチ）と、`push` のタグ `m0-*`。**`workflow_dispatch` は使わない**（ワークフローがデフォルトブランチ `main` にあるときしか実行できず、M0の間は `main` に載らないため）。Releaseの作成は、タグ `m0-<n>` をpushしたときだけ走らせる。
-- **ジョブ `test`**：`macos-26`。`swift test --package-path Packages/VLCChatCore`。
+- **ジョブ `test`**：`macos-26`。`build` ジョブと同じXcode固定（`sudo xcode-select -s /Applications/Xcode_26.6.app`）の後、`swift test --package-path Packages/VLCChatCore`。
 - **ジョブ `build`**（`test` の後）：`macos-26`。手順：(1) checkout、(2) Xcodeを固定する（`sudo xcode-select -s /Applications/Xcode_26.6.app`。`macos-26` の既定は26.6だが、ランナーイメージの更新で変わり得るため）、`xcodebuild -version` と `swift --version` をログに出す、(3) `brew install xcodegen`、(4) SwiftPMのキャッシュ（restoreは(4)、saveは(6)の後。`~/Library/Caches/org.swift.swiftpm` と `build/SourcePackages`。キーは `project.yml` のハッシュ。xcframeworkが約382MBあるので必須。**`actions/cache` はジョブ成功時にしか保存しないので、`actions/cache/restore` と、`if: always() && steps.<restoreのid>.outputs.cache-hit != 'true'` を付けた `actions/cache/save` に分ける**。落ちるたびに取り直さないため）、(5) `xcodegen generate`、(6) `scripts/make-ipa.sh`、(7) `actions/upload-artifact`（ipaとビルドログ。`if: always()` を付け、失敗時も `xcodebuild.log` を残す）、(8) タグ `m0-*` のpushのときだけ、`gh release create "$GITHUB_REF_NAME" build/vlc-with-chat-unsigned.ipa --prerelease --notes ...`（notesに、libVLC（LGPL-2.1+）とSwiftVLC（MIT）を含むこと、ソースの入手先（本リポジトリと上流のURL）を書く。リポジトリは公開で、ipaの配布はlibVLCの静的リンク版の配布にあたるため）（タグが既に存在するので `--target` は不要。`permissions: contents: write`、`env: GH_TOKEN: ${{ github.token }}`）。
-- **`scripts/make-ipa.sh`**：`xcodebuild archive -project VLCWithChat.xcodeproj CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER:-1}" -scheme VLCWithChat -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/VLCWithChat.xcarchive -clonedSourcePackagesDirPath build/SourcePackages CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO AD_HOC_CODE_SIGNING_ALLOWED=YES`、続けて `mkdir -p build/ipa/Payload`、`cp -R build/VLCWithChat.xcarchive/Products/Applications/VLCWithChat.app build/ipa/Payload/`、`(cd build/ipa && zip -qry ../vlc-with-chat-unsigned.ipa Payload)`（ipaのルートが `Payload/` になるよう、`build/ipa` の中で実行する）。`set -euo pipefail`。`xcodebuild` は `2>&1 | tee build/xcodebuild.log` でログを残す（`pipefail` で失敗を拾う）。出力は `build/vlc-with-chat-unsigned.ipa`。
+- **`scripts/make-ipa.sh`**：`xcodebuild archive -project VLCWithChat.xcodeproj CURRENT_PROJECT_VERSION="${GITHUB_RUN_NUMBER:-1}" -scheme VLCWithChat -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -archivePath build/VLCWithChat.xcarchive -clonedSourcePackagesDirPath build/SourcePackages CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO AD_HOC_CODE_SIGNING_ALLOWED=YES`、続けて `mkdir -p build/ipa/Payload`、`cp -R build/VLCWithChat.xcarchive/Products/Applications/VLCWithChat.app build/ipa/Payload/`、`(cd build/ipa && zip -qry ../vlc-with-chat-unsigned.ipa Payload)`（ipaのルートが `Payload/` になるよう、`build/ipa` の中で実行する）。`set -euo pipefail`。**冒頭で `mkdir -p build`**（`tee` の出力先が無いと、キャッシュなしの初回で `pipefail` により失敗する）。`xcodebuild` は `2>&1 | tee build/xcodebuild.log` でログを残す（`pipefail` で失敗を拾う）。出力は `build/vlc-with-chat-unsigned.ipa`。**続けて、同じ `.app` を `ldid -S<entitlements.plist>`（SideStoreのMakefileと同じ。`brew install ldid` をCIの手順に入れる）で偽署名した `build/vlc-with-chat-fakesigned.ipa` も作り、両方をReleaseに載せる**（チェック1が外れたときの往復を1回減らす）。**最後に、できたipaを機械的に確かめる**：`unzip -l` でルートが `Payload/VLCWithChat.app/` であること、`plutil -p`（`.app` 内の `Info.plist`）で `UIBackgroundModes` に `audio` があり `CFBundleVersion` が実行番号であること。どれかが外れたらスクリプトを失敗させる。
 - ビルドに失敗したら、`gh run view <id> --log-failed` でログを読み、直して再pushする。
 
 ## 7. テスト方針
 
-- ビジネスロジックをUIから分離する：計測の集計（`IntervalStats`）はPackageに分け、Swift Testingで単体テストする（観点：空・1件・複数件の最小/平均/最大、直近N秒の窓から古い値が落ちること、時刻が逆行した入力は捨てる、2件未満は `nil`、`reset()` 後は空）。UI・Player・ファイル・PiPの配線はテストしない（実機で確かめる）。
+- ビジネスロジックをUIから分離する：計測の集計（`IntervalStats`）はPackageに分け、Swift Testingで単体テストする（観点：空と1件は `nil`、2件以上の最小/平均/最大（wall・mediaの両方）、窓の境界（`at == now - 30` は含まない）、直近N秒の窓から古い値が落ちること、時刻が逆行した入力は捨てる、2件未満は `nil`、`reset()` 後は空）。UI・Player・ファイル・PiPの配線はテストしない（実機で確かめる）。
 - 実際の再生・PiP・ロック・SideStoreは、8節の実機の手順で確かめる。
 
 ## 8. 動作確認手順（読み替え：iPhone実機。ユーザーの作業）
@@ -181,6 +184,11 @@ ipaは、タグ `m0-<n>`（`<n>` は1から連番）をpushして作る GitHub R
 - **PiPの無料署名での可否**：未確認。**外れても諦めずに原因を切り分ける**（ユーザーの決定。署名の制限かライブラリの実装かを調べ、結果を持って改めて相談する）。PiPが有効だとロック中も音声が続くため、バックグラウンド音声の見込みにも直結する。
 - **ブックマークのオプション**：iOSで正しい値が確定できていない。実機で `.minimalBookmark` と `[]` を試す。
 - M0の結果が、Issueの前提（SwiftVLC・SideStore）を変える場合は、計画を作り直す（ステップ2〜4に戻る）。
+
+## 11.4 M0の後始末（ユーザーに確認する）
+
+- タグ `m0-*` とReleaseは、featureブランチのコミットに付くため、squashマージ後も計画書（`design-docs-for-ai/`）を含む履歴が公開リポジトリに残る。M0が終わったら、タグとReleaseを消すか残すかをユーザーに確認する。
+- 公開Releaseにlibvlc（LGPL-2.1+、静的リンク）入りのipaを置くので、LGPLの全文はReleaseのアセットに添える（notesには名称と入手先）。アプリ内表示など、それ以上の条件はIssueの本実装の要件（設定画面のライセンス表示）に任せ、M0では範囲外としてよいかを、タグを切る前にユーザーに確認する。
 
 ## 11.5 作業ブランチ
 
