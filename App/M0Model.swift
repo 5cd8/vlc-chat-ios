@@ -48,7 +48,7 @@ final class M0Model {
   private(set) var pickSummary = "—"
   private(set) var playError: String?
   private(set) var bookmarkReports: [BookmarkReport] = []
-  /// 作り直すと `PiPVideoView` が再構築され、`startsAutomaticallyFromInline` が反映される。
+  /// 変えると `PiPVideoView` が再構築され、`startsAutomaticallyFromInline` が反映される。
   private(set) var videoViewID = UUID()
   var autoPiP = true
 
@@ -62,6 +62,7 @@ final class M0Model {
   private(set) var pip: PiPController?
 
   @ObservationIgnored private var instance: VLCInstance?
+  @ObservationIgnored private var builtAutoPiP = true
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var stats = IntervalStats()
   @ObservationIgnored private var lastTimeReceivedAt: TimeInterval?
@@ -146,7 +147,11 @@ final class M0Model {
     guard let player else { return }
     playError = nil
     resetStats()
-    videoViewID = UUID()
+    // startsAutomaticallyFromInline は PiPVideoView の作成時にしか効かない。変わったときだけ作り直す。
+    if autoPiP != builtAutoPiP {
+      builtAutoPiP = autoPiP
+      videoViewID = UUID()
+    }
     do {
       if launchPolicy == .application {
         // アプリ管理では SwiftVLC が音声セッションを有効化しないので、play の前に自分で行う。
