@@ -39,8 +39,8 @@ struct M0View: View {
     ZStack {
       Color.black
       if let player = model.player {
-        PiPVideoView(player, controller: $pip, startsAutomaticallyFromInline: model.autoPiP)
-          .id(model.videoViewID)
+        // 自動PiP（startsAutomaticallyFromInline）は既定のtrueのまま。オフにする使い方は想定しない。
+        PiPVideoView(player, controller: $pip)
       } else {
         Text(model.setupError ?? "プレイヤーなし").foregroundStyle(.white).padding()
       }
@@ -87,7 +87,6 @@ struct M0View: View {
 
       HStack {
         Button("PiP開始") { model.startPiP() }.buttonStyle(.bordered)
-        Toggle("自動PiP（次の再生から）", isOn: Bindable(model).autoPiP).font(.caption)
       }
       HStack {
         Picker("音声セッション", selection: $policySelection) {
