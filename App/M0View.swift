@@ -86,7 +86,7 @@ struct M0View: View {
       }
 
       HStack {
-        Button("PiP開始") { model.startPiP() }.buttonStyle(.bordered)
+        Button("PiP開始/停止") { model.startPiP() }.buttonStyle(.bordered)
       }
       HStack {
         Picker("音声セッション", selection: $policySelection) {

@@ -268,7 +268,9 @@ final class M0Model {
   }
 
   func sceneDidChange(isActive: Bool, name: String) {
-    log.write("画面 \(name)")
+    // ロック検知の通知はパスコード設定時にしか届かないので、前面復帰時の状態もここに残す。
+    let state = player.map { "\($0.state) 時間=\($0.currentTime.formatted)" } ?? "-"
+    log.write("画面 \(name) 状態=\(state)")
     // 前面に戻ったときは、再生中なら画面を消さない状態に戻す。
     UIApplication.shared.isIdleTimerDisabled = isActive && player?.state == .playing
   }

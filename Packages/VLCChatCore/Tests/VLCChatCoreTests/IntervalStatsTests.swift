@@ -79,6 +79,18 @@ struct IntervalStatsTests {
     #expect(snapshot.media == .init(min: 3, avg: 3, max: 3))
   }
 
+  @Test("受信時刻もメディア時刻も戻った入力は、窓をリセットせず捨てる") func dropsRegressedRecordBeforeCheckingMediaRegression() throws {
+    var stats = IntervalStats()
+    stats.record(at: 10, mediaTime: 5)
+    // 受信時刻の判定が先。メディア時刻の判定が先だと、この1件で窓が消えて (9, 0) が基準になる。
+    stats.record(at: 9, mediaTime: 0)
+    stats.record(at: 11, mediaTime: 6)
+    let snapshot = try #require(stats.snapshot(now: 11))
+    #expect(snapshot.samples == 2)
+    #expect(snapshot.wall == .init(min: 1, avg: 1, max: 1))
+    #expect(snapshot.media == .init(min: 1, avg: 1, max: 1))
+  }
+
   @Test("メディア時刻が戻ったら窓をリセットして新しい基準にする") func restartsWindowWhenMediaTimeGoesBackward() throws {
     var stats = IntervalStats()
     stats.record(at: 0, mediaTime: 100)
