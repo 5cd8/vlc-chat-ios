@@ -46,6 +46,7 @@ final class M0Model {
 
   // 選択・再生
   private(set) var pickSummary = "—"
+  private(set) var timeToPlaySummary = "—"
   private(set) var playError: String?
   private(set) var bookmarkReports: [BookmarkReport] = []
 
@@ -146,12 +147,7 @@ final class M0Model {
     playError = nil
     resetStats()
     do {
-      if launchPolicy == .application {
-        // アプリ管理では SwiftVLC が音声セッションを有効化しないので、play の前に自分で行う。
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playback, mode: .moviePlayback)
-        try session.setActive(true)
-      }
+      try activateAudioSessionIfAppManaged()
       try player.play(url: file.url)
       // 古いファイルのスコープは、新しい再生を始めてから解放する。
       currentFile = file
@@ -162,10 +158,30 @@ final class M0Model {
     }
   }
 
+  // MARK: - 音声セッション（アプリ管理のとき）
+
+  /// アプリ管理では SwiftVLC が音声セッションを有効化しない（中断明けも再有効化しない）ので、
+  /// 再生を始める・再開する前に自分で有効化する。ライブラリ管理では何もしない。
+  private func activateAudioSessionIfAppManaged() throws {
+    guard launchPolicy == .application else { return }
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(.playback, mode: .moviePlayback)
+    try session.setActive(true)
+  }
+
+  private func activateAudioSessionIfAppManagedLoggingFailure() {
+    do {
+      try activateAudioSessionIfAppManaged()
+    } catch {
+      log.write("音声セッションの有効化に失敗: \(error)")
+    }
+  }
+
   // MARK: - 操作
 
   func togglePlayPause() {
     log.write("操作 togglePlayPause")
+    activateAudioSessionIfAppManagedLoggingFailure()
     player?.togglePlayPause()
   }
 
@@ -345,7 +361,9 @@ final class M0Model {
       // 一時停止・シークからの復帰で空白がmaxに入らないようにする。
       resetStats()
       if let returned = pickReturnedAt {
-        log.write(String(format: "再生開始までの時間 %.3fs", ProcessInfo.processInfo.systemUptime - returned))
+        let text = String(format: "%.3fs", ProcessInfo.processInfo.systemUptime - returned)
+        timeToPlaySummary = text
+        log.write("再生開始までの時間 \(text)")
         pickReturnedAt = nil
       }
     }
@@ -362,6 +380,10 @@ final class M0Model {
       Task { [weak self] in
         for await notification in center.notifications(named: name) {
           let detail = notification.userInfo?[AVAudioSessionInterruptionTypeKey].map { " type=\($0)" } ?? ""
+          let interruptionType = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+          if interruptionType == AVAudioSession.InterruptionType.ended.rawValue {
+            self?.activateAudioSessionIfAppManagedLoggingFailure()
+          }
           let state = self?.player?.state
           self?.log.write("\(label)\(detail) 状態=\(state.map(String.init(describing:)) ?? "-")")
         }

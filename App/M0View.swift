@@ -117,6 +117,7 @@ struct M0View: View {
         line("PiP開始結果", model.pipStartResult)
         line("PiPイベント", model.pipSummary)
         line("選択", model.pickSummary)
+        line("再生開始までの時間", model.timeToPlaySummary)
         ForEach(model.bookmarkReports) { report in
           line("ブックマーク(\(report.variant.label))", report.summary)
         }
