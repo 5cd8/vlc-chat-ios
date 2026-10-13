@@ -105,6 +105,8 @@ final class M0Model {
     pickSummary = summary
     log.write("選択 \(summary.replacingOccurrences(of: "\n", with: " "))")
 
+    play(file)
+    // 作成に時間がかかっても、再生開始までの時間(経路の比較用)に入らないよう再生の後に行う。
     if file.didStartAccess {
       for variant in BookmarkVariant.allCases {
         do {
@@ -116,7 +118,6 @@ final class M0Model {
     } else {
       log.write("ブックマークを作らない: startAccessing=false")
     }
-    play(file)
   }
 
   func didFailToPick(_ error: Error, source: String) {
@@ -145,6 +146,7 @@ final class M0Model {
   private func play(_ file: ScopedFile) {
     guard let player else { return }
     playError = nil
+    timeToPlaySummary = "—"
     resetStats()
     do {
       try activateAudioSessionIfAppManaged()

@@ -13,13 +13,14 @@ struct IntervalStatsTests {
     var stats = IntervalStats()
     stats.record(at: 0, mediaTime: 10)
     stats.record(at: 1, mediaTime: 12)
-    stats.record(at: 3, mediaTime: 13)
-    let snapshot = try #require(stats.snapshot(now: 3))
-    #expect(snapshot.samples == 3)
-    // wall の間隔は 1, 2
-    #expect(snapshot.wall == .init(min: 1, avg: 1.5, max: 2))
-    // media の間隔は 2, 1
-    #expect(snapshot.media == .init(min: 1, avg: 1.5, max: 2))
+    stats.record(at: 2, mediaTime: 13)
+    stats.record(at: 6, mediaTime: 19)
+    let snapshot = try #require(stats.snapshot(now: 6))
+    #expect(snapshot.samples == 4)
+    // wall の間隔は 1, 1, 4。平均は 6/3 = 2（最小と最大の中点 2.5 ではない）
+    #expect(snapshot.wall == .init(min: 1, avg: 2, max: 4))
+    // media の間隔は 2, 1, 6。平均は 9/3 = 3（中点 3.5 ではない）。wall と値が違う
+    #expect(snapshot.media == .init(min: 1, avg: 3, max: 6))
   }
 
   @Test("窓の境界は含まない") func excludesRecordAtWindowBoundary() throws {
@@ -95,8 +96,9 @@ struct IntervalStatsTests {
   @Test("reset後0.5秒間の記録は捨てる") func dropsRecordsForHalfSecondAfterReset() throws {
     var stats = IntervalStats()
     stats.record(at: 1, mediaTime: 1)
+    stats.record(at: 2, mediaTime: 2)
     stats.reset(at: 5)
-    // reset で空になる
+    // reset で空になる（reset前は2件あるので、消えていなければ nil にならない）
     #expect(stats.snapshot(now: 5) == nil)
     stats.record(at: 5.25, mediaTime: 0)
     stats.record(at: 5.375, mediaTime: 0)
