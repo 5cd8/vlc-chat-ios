@@ -116,6 +116,8 @@ final class M0Model {
           log.write("ブックマーク作成失敗 \(variant.label): \(error)")
         }
       }
+    } else {
+      log.write("ブックマークを作らない: startAccessing=false")
     }
     play(file)
   }
@@ -164,6 +166,7 @@ final class M0Model {
       currentFile = file
     } catch {
       playError = "\(error)"
+      pickReturnedAt = nil
       log.write("再生開始失敗: \(error)")
     }
   }
@@ -345,6 +348,8 @@ final class M0Model {
   private func stateDidChange(_ state: PlayerState) {
     log.write("状態 \(state)")
     UIApplication.shared.isIdleTimerDisabled = (state == .playing)
+    // 一時停止などをまたいだ空白が、再開直後の外れ値として記録されないようにする。
+    if state != .playing { lastTimeReceivedAt = nil }
     if state == .playing {
       // 一時停止・シークからの復帰で空白がmaxに入らないようにする。
       resetStats()

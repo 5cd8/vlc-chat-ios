@@ -23,6 +23,8 @@ final class DiagnosticsLog: @unchecked Sendable {
     _ = try? handle?.seekToEnd()
     formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    // 体感で覚えている時刻と突き合わせられるよう、UTCではなく端末のタイムゾーンで書く。
+    formatter.timeZone = .current
   }
 
   func write(_ message: String) {

@@ -2,14 +2,14 @@ import Testing
 @testable import VLCChatCore
 
 struct IntervalStatsTests {
-  @Test func 空と1件ではnil() {
+  @Test("空と1件ではnil") func returnsNilForFewerThanTwoRecords() {
     var stats = IntervalStats()
     #expect(stats.snapshot(now: 0) == nil)
     stats.record(at: 1, mediaTime: 10)
     #expect(stats.snapshot(now: 1) == nil)
   }
 
-  @Test func 最小平均最大をwallとmediaの両方で出す() throws {
+  @Test("最小平均最大をwallとmediaの両方で出す") func computesMinAvgMaxForWallAndMedia() throws {
     var stats = IntervalStats()
     stats.record(at: 0, mediaTime: 10)
     stats.record(at: 1, mediaTime: 12)
@@ -22,7 +22,7 @@ struct IntervalStatsTests {
     #expect(snapshot.media == .init(min: 1, avg: 1.5, max: 2))
   }
 
-  @Test func 窓の境界は含まない() throws {
+  @Test("窓の境界は含まない") func excludesRecordAtWindowBoundary() throws {
     var stats = IntervalStats()
     stats.record(at: 0, mediaTime: 0)
     stats.record(at: 10, mediaTime: 10)
@@ -36,16 +36,18 @@ struct IntervalStatsTests {
     #expect(inside.samples == 3)
   }
 
-  @Test func 記録時に窓より古い記録を新しい記録を基準に捨てる() {
+  @Test("記録時に窓より古い記録を新しい記録を基準に捨てる") func dropsRecordsOlderThanWindowOnRecord() {
     var stats = IntervalStats()
     stats.record(at: 0, mediaTime: 0)
     stats.record(at: 1, mediaTime: 1)
-    // 40 - 30 = 10 なので 0 と 1 は捨てられ、40 の1件だけが残る
+    // 40 - 30 = 10 なので 0 と 1 は捨てられ、40 の1件だけが残る。
+    // snapshot 側の絞り込み（at > now - 30）では区別できないよう、古い時刻 25 で問い合わせる
+    // （捨てていなければ at > -5 で3件になり、nil にならない）。
     stats.record(at: 40, mediaTime: 40)
-    #expect(stats.snapshot(now: 40) == nil)
+    #expect(stats.snapshot(now: 25) == nil)
   }
 
-  @Test func 受信時刻が前回以前の入力は捨てる() throws {
+  @Test("受信時刻が前回以前の入力は捨てる") func dropsRecordWhoseTimeDoesNotAdvance() throws {
     var stats = IntervalStats()
     stats.record(at: 10, mediaTime: 0)
     stats.record(at: 9, mediaTime: 1)
@@ -59,7 +61,7 @@ struct IntervalStatsTests {
     #expect(snapshot.media == .init(min: 3, avg: 3, max: 3))
   }
 
-  @Test func メディア時刻が戻ったら窓をリセットして新しい基準にする() throws {
+  @Test("メディア時刻が戻ったら窓をリセットして新しい基準にする") func restartsWindowWhenMediaTimeGoesBackward() throws {
     var stats = IntervalStats()
     stats.record(at: 0, mediaTime: 100)
     stats.record(at: 1, mediaTime: 101)
@@ -73,7 +75,7 @@ struct IntervalStatsTests {
     #expect(snapshot.media == .init(min: 1, avg: 1, max: 1))
   }
 
-  @Test func reset後0_5秒間の記録は捨てる() throws {
+  @Test("reset後0.5秒間の記録は捨てる") func dropsRecordsForHalfSecondAfterReset() throws {
     var stats = IntervalStats()
     stats.record(at: 1, mediaTime: 1)
     stats.reset(at: 5)
