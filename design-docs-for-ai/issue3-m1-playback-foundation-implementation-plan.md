@@ -40,12 +40,12 @@ Issue #3 の「範囲」に書かれた機能要件 1・2（プレイリスト�
 
 | 事実 | 出典 |
 |---|---|
-| **SwiftVLC `Player` の宣言（v1.1.0-beta.14のソースで確認済み）：** `Player`（`@Observable @MainActor`）。`init(instance:)`。`state: PlayerState`（`.idle .opening .buffering .playing .paused .stopped .stopping .error`）、`isPlaybackRequestedActive: Bool`（ユーザーの再生意図。一時停止の要求が処理中でも、操作ボタンの表示を揃えるための値）、`currentTime: Duration`、`duration: Duration?`、`isSeekable`、`rate: Float`、`didReachEnd`、`activeVideoOutputs`、`videoTracks`/`audioTracks`。`play(url:) throws(VLCError)`、`pause()`、`resume()`、`togglePlayPause()`（`.idle`・`.stopped` なら `try? play()`＝**先頭から再生**、`.playing/.opening/.buffering/.paused` なら `isPlaybackRequestedActive` で `pause()` か `resume()`、`.stopping`・`.error` は何もしない）、`jump(by: Duration) -> Bool`、`seek(to: PlaybackPosition) throws(VLCError)`、`setPlaybackRate(_ rate: PlaybackRate) throws(VLCError)`（`PlaybackRate(Float)` は 0.25〜4.0 に丸める）、`events(policy:filter:) -> AsyncStream<PlayerEvent>`、`stateTransitions: AsyncStream<PlayerState>` | `Sources/SwiftVLC/Player/Player.swift`、`Player+PlaybackControl.swift`、`Player+Pause.swift`（104〜120行）、`Player+Seek.swift`、`Player+Typed.swift`、`Player+EventStreams.swift`。`gh api "repos/harflabs/SwiftVLC/contents/<path>?ref=v1.1.0-beta.14"` |
+| **SwiftVLC `Player` の宣言（v1.1.0-beta.14のソースで確認済み）：** `Player`（`@Observable @MainActor`）。`init(instance:)`。`state: PlayerState`（`.idle .opening .buffering .playing .paused .stopped .stopping .error`）、`isPlaybackRequestedActive: Bool`（ユーザーの再生意図。一時停止の要求が処理中でも、操作ボタンの表示を揃えるための値）、`currentTime: Duration`、`duration: Duration?`、`isSeekable`、`rate: Float`、`didReachEnd`、`activeVideoOutputs`、`videoTracks`/`audioTracks`。`play(url:) throws(VLCError)`、`pause()`、`resume()`、`togglePlayPause()`（`.idle`・`.stopped` なら `try? play()`＝**先頭から再生**、`.playing/.opening/.buffering/.paused` なら `isPlaybackRequestedActive` で `pause()` か `resume()`、`.stopping`・`.error` は何もしない）、`jump(by: Duration) -> Bool`、`seek(to: PlaybackPosition) throws(VLCError)`、`setPlaybackRate(_ rate: PlaybackRate) throws(VLCError)`（`PlaybackRate(Float)` は 0.25〜4.0 に丸める）、`events(policy:filter:) -> AsyncStream<PlayerEvent>`、`stateTransitions: AsyncStream<PlayerState>`、`eventEnvelopes(policy:filter:) -> AsyncStream<PlayerEventEnvelope>`（filterの引数は `PlayerEventEnvelope`。`envelope.event` で種類を判定し、`envelope.playbackGeneration` と `Player.generation` を比べる） | `Sources/SwiftVLC/Player/Player.swift`、`Player+PlaybackControl.swift`、`Player+Pause.swift`（104〜120行）、`Player+Seek.swift`、`Player+Typed.swift`、`Player+EventStreams.swift`。`gh api "repos/harflabs/SwiftVLC/contents/<path>?ref=v1.1.0-beta.14"` |
 | **PiP：** `PiPVideoView(_ player, controller: Binding<PiPController?>? = nil, startsAutomaticallyFromInline: Bool = true)`。`PiPController`（`@Observable @MainActor`）の `isPossible`・`isActive`、`toggleReportingStartResult() -> PiPStartResult?`、`pipEventEnvelopes: AsyncStream<PiPEventEnvelope>`（`.event`・`.stopCause`）。PiPの窓の再生/一時停止・スキップは、SwiftVLCがプレイヤーを直接操作し、アプリの「操作」を通らない（状態の変化としてだけ観測できる） | `PiP/PiPVideoView.swift`、`PiP/PiPController*.swift`、M0のログ |
 | **音声セッション：** `VLCInstance(appleAudioSessionPolicy: .applicationManaged)` を `Player(instance:)` に渡す。アプリ管理では、SwiftVLCもlibVLCも `AVAudioSession` を有効化せず、**中断明けにも再有効化しない**。ライブラリ管理は、PiPなしのロックで一時停止する（M0のログで確認済み）。`.shared` に触れると `.libraryManaged` のインスタンスが生成されてしまう | `Core/VLCInstance.swift`、`Core/AppleAudioSessionPolicy.swift`、`PiP/PiPController+AudioSession.swift`、M0のログ |
 | **M0の実機（確認済み）：** 無料署名でPiP・バックグラウンド音声（アプリ管理）が動く／`timeChanged` は約260ms間隔（約4Hz）で、解像度に依存しない／`togglePlayPause` は終了後に先頭から再生する／再生を止めるとメモリが約20〜30MBに戻る／2560×1440のAV1、4KのVP9・AV1は問題なし／`PiPVideoView` を再生後に作り直すと、SwiftVLCが既存の描画面を引き継ぐ（作り直しは避ける） | Issue #1 のコメント、PR #2 |
 | **M0のコード（`main`）：** `App/M0Model.swift`（419行。`play(_:)` 146行、`togglePlayPause` 184行、`jump` 190行、`seek` 197行、`setRate` 208行、`attachPiP` 226行、`startObserving` 314行、`stateDidChange` 365行、`observeSystemNotifications` 384行）、`App/M0View.swift`（161行）、`App/ScopedFile.swift`（66行。`ScopedFile` クラス＝セキュリティスコープの start/stop 対、`BookmarkVariant`＝M1では使わない）、`App/DiagnosticsLog.swift`（52行。`DiagnosticsLog.physFootprintMB()` は引き継ぐ）、`Packages/VLCChatCore/.../IntervalStats.swift`（引き継ぐ） | リポジトリ |
-| **MediaPlayerフレームワーク（`MPRemoteCommandCenter`・`MPNowPlayingInfoCenter`）：** Appleの公式文書のページは取得できなかった（JavaScript描画）。以下は、実装者の知識による**未確認の一次情報**で、**型名・プロパティ名は、CIのコンパイルで確かめる**。`MPRemoteCommandCenter.shared()` の `playCommand`・`pauseCommand`・`togglePlayPauseCommand`・`skipForwardCommand`/`skipBackwardCommand`（`MPSkipIntervalCommand`。`preferredIntervals: [NSNumber]`。イベントは `MPSkipIntervalCommandEvent.interval`）・`changePlaybackPositionCommand`（`MPChangePlaybackPositionCommandEvent.positionTime`）・`nextTrackCommand`・`previousTrackCommand`。`isEnabled`、`addTarget(handler:) -> Any`（戻り値のトークンを `removeTarget(_:)` に渡す）、ハンドラは `MPRemoteCommandHandlerStatus`（`.success` ほか）を返す。**ハンドラがメインスレッドで呼ばれる保証は無い**ものとして書く。`MPNowPlayingInfoCenter.default().nowPlayingInfo`（`[String: Any]`。キーは `MPMediaItemPropertyTitle`・`MPMediaItemPropertyPlaybackDuration`・`MPNowPlayingInfoPropertyElapsedPlaybackTime`・`MPNowPlayingInfoPropertyPlaybackRate`・`MPNowPlayingInfoPropertyDefaultPlaybackRate`）、`playbackState`（`.playing .paused .stopped`）。コマンドを表示させるには、音声セッションが有効で、`nowPlayingInfo` が設定されている必要がある（実機で確かめる） | https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter 、`.../mpremotecommand` 、`.../mpnowplayinginfocenter` （取得できない場合は、Xcode 26.6のSDKヘッダーをCIのコンパイルエラーで確かめる） |
+| **MediaPlayerフレームワーク（`MPRemoteCommandCenter`・`MPNowPlayingInfoCenter`）：** Appleの公式文書のページは取得できなかった（JavaScript描画）。以下は、実装者の知識による**未確認の一次情報**で、**型名・プロパティ名は、CIのコンパイルで確かめる**。`MPRemoteCommandCenter.shared()` の `playCommand`・`pauseCommand`・`togglePlayPauseCommand`・`skipForwardCommand`/`skipBackwardCommand`（`MPSkipIntervalCommand`。`preferredIntervals: [NSNumber]`。イベントは `MPSkipIntervalCommandEvent.interval`）・`changePlaybackPositionCommand`（`MPChangePlaybackPositionCommandEvent.positionTime`）・`nextTrackCommand`・`previousTrackCommand`。`isEnabled`、`addTarget(handler:) -> Any`（戻り値のトークンを `removeTarget(_:)` に渡す）、ハンドラは `MPRemoteCommandHandlerStatus`（`.success` ほか）を返す。**ハンドラがメインスレッドで呼ばれる保証は無い**ものとして書く。`MPNowPlayingInfoCenter.default().nowPlayingInfo`（`[String: Any]`。キーは `MPMediaItemPropertyTitle`・`MPMediaItemPropertyPlaybackDuration`・`MPNowPlayingInfoPropertyElapsedPlaybackTime`・`MPNowPlayingInfoPropertyPlaybackRate`・`MPNowPlayingInfoPropertyDefaultPlaybackRate`）、`playbackState`（`.playing .paused .stopped`。iOSでは効かず、再生レートで判定される可能性がある。実機で確かめる）。コマンドを表示させるには、音声セッションが有効で、`nowPlayingInfo` が設定されている必要がある（実機で確かめる） | https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter 、`.../mpremotecommand` 、`.../mpnowplayinginfocenter` （取得できない場合は、Xcode 26.6のSDKヘッダーをCIのコンパイルエラーで確かめる） |
 
 ## 3. 未確認事項（M1の実機で必ず確かめる。計画の前提にしない）
 
@@ -57,7 +57,9 @@ Issue #3 の「範囲」に書かれた機能要件 1・2（プレイリスト�
 | U4 | ロック画面の操作と、PiPの窓の操作が競合しないか | チェックD・E | 報告して相談 |
 | U5 | 一時停止したまま背面→復帰しても、勝手に再開しないか | チェックC | 再現手順をログ（PiPの有無つき）とともに報告して相談 |
 | U6 | `PlaybackClock` の補間と、シーク直後の位置の挙動（シーク先が遅い4K・AV1、一時停止中のシーク）が滑らかか | チェックB | 定数（5.1節の `seekSettleTolerance`・`seekSettleTimeout`・`backwardTolerance`）を調整 |
-| U7 | `MPRemoteCommandCenter` のハンドラが呼ばれるスレッド | 実装時に `Thread.isMainThread` をログに出して確かめる（M1の実機のログで見る） | メインアクターへ渡す設計（7.2節）のまま。変更不要 |
+| U7 | `MPRemoteCommandCenter` のハンドラが呼ばれるスレッド | 実装時に `Thread.isMainThread` をログに出して確かめる（M1の実機のログで見る） | メインアクターへ渡す設計（D10）のまま。変更不要 |
+| U8 | アプリ管理の音声セッションを、状態の通知（`.opening`/`.buffering`/`.playing`）の後に有効化して、PiPの窓の再生・中断明けの再開で音が戻るか（再開の要求より後になる） | チェックD | `isPlaybackRequestedActive` を `withObservationTracking` で監視し、再開の要求の時点で有効化する |
+| U9 | 長時間再生のメモリの緩やかな上昇（M0で約15MB/時）が頭打ちするか | チェックF | 報告して相談 |
 
 ## 4. ファイル構成
 
@@ -137,7 +139,8 @@ public struct PlaybackClock: Sendable {
 - `.stopped` なら `0`。
 - `.paused` なら `anchorMedia`。
 - `.playing` で `awaitingFirstNote` なら `anchorMedia`（状態の通知は、実際に映像・音声が進み始めるより早く届くことがあり、そこから補間すると表示が先に進んでしまう）。
-- `.playing` で `awaitingFirstNote` でなければ `anchorMedia + max(0, at - anchorUptime) * rate`。
+- `.playing` で `pendingSeek` がある間も `anchorMedia`（シーク先に着地する通知までは進めない。4K・AV1でシークに時間がかかるとき、補間で先に進んだ後に着地の通知で表示が戻るのを防ぐ）。
+- `.playing` で `awaitingFirstNote` でも `pendingSeek` でもなければ `anchorMedia + max(0, at - anchorUptime) * rate`。
 - いずれも、`duration` が分かっていれば `min(…, duration)`、下限は `0`。
 
 規則（変更操作）：
@@ -163,20 +166,23 @@ public struct PlaybackClock: Sendable {
 7. 前方へのずれを受け入れる：再生中、`noteMediaTime(10, at: 0)`、`noteMediaTime(11, at: 0.5)`（`current == 10.5` より進んでいる）で `position(at: 0.5) == 11`。
 8. わずかな後退は無視する：`noteMediaTime(10, at: 0)`、`noteMediaTime(10.4, at: 0.5)`（`current == 10.5`、差0.1 ≤ 0.5）で `position(at: 0.5) == 10.5`（基準を変えない）。
 9. 大きな後退は受け入れる：`noteMediaTime(10, at: 0)`、`noteMediaTime(5, at: 0.5)`（差5.5 > 0.5）で `position(at: 0.5) == 5`。
-10. シーク直後の古い通知を捨てる：`play(at: 0)` 済みで `noteMediaTime(10, at: 0)`、`seek(to: 100, at: 1)`、`noteMediaTime(11, at: 1.1)`（|11−100|>1.0 かつ 経過0.1<2.0）は捨てて `position(at: 1.5) == 100.5`。
+10. シーク直後の古い通知を捨てる：`play(at: 0)` 済みで `noteMediaTime(10, at: 0)`、`seek(to: 100, at: 1)`、`noteMediaTime(11, at: 1.1)`（|11−100|>1.0 かつ 経過0.1<2.0）は捨てて（戻り値は `false`）、`position(at: 1.5) == 100`（シーク待ちの間は補間しない）。
 11. シーク先に近い通知を受け入れる：上の続きで `noteMediaTime(100.2, at: 1.3)`（|100.2−100|=0.2 ≤ 1.0）を受け入れ、通常の規則（わずかな後退の無視）を通さず `position(at: 1.3) == 100.2`。
 12. シークのタイムアウト：`play(at: 0)` 済みで `seek(to: 100, at: 0)` の後、`noteMediaTime(50, at: 2.0)`（|50−100|>1.0 だが経過2.0 ≥ 2.0）を受け入れて `position(at: 2.0) == 50`。
 13. 長さでの上限：`setDuration(60)`、`noteMediaTime(59.9, at: 0)` の後 `position(at: 5) == 60`（5 + 59.9 を長さ60で打ち切る）。
-14. 停止で0に戻り、停止中の通知は無視される：`noteMediaTime(10, at: 0)`、`stop()`、`noteMediaTime(20, at: 1)`（無視される）、`play(at: 2)` の後 `position(at: 3) == 0`（`mode == .stopped` の間は `position(at: 5) == 0` でもある）。
-15. シークの目標のクランプ（`position` 側の上下限に隠れないよう、後続の動きで確かめる）：`setDuration(60)` の後、`seek(to: 100, at: 0)` で `position(at: 0) == 60`、続けて `noteMediaTime(59.8, at: 0.1)`（目標が60にクランプされていれば |59.8−60| ≤ 1.0 で受け入れられる。クランプされていなければ捨てられる）で `position(at: 0.1) == 59.8`。さらに `seek(to: -5, at: 1)` の後 `position(at: 6) == 5`（基準が0にクランプされていれば 0 + 5。クランプされていなければ −5 + 5 = 0）。
+14. 停止で0に戻り、停止中の通知は無視される：`noteMediaTime(10, at: 0)`、`stop()`、`noteMediaTime(20, at: 1)`（無視される。戻り値は `false`）、`play(at: 2)` の後 `position(at: 3) == 0`（`mode == .stopped` の間は `position(at: 5) == 0` でもある）。
+15. シークの目標のクランプ（`position` 側の上下限に隠れないよう、後続の動きで確かめる）：`setDuration(60)` の後、`seek(to: 100, at: 0)` で `position(at: 0) == 60`、続けて `noteMediaTime(59.8, at: 0.1)`（目標が60にクランプされていれば |59.8−60| ≤ 1.0 で受け入れられる。クランプされていなければ捨てられる）で `position(at: 0.1) == 59.8`。さらに `seek(to: -5, at: 1)`、`noteMediaTime(0.25, at: 1.25)` の後 `position(at: 6.25) == 5.25`（目標が0にクランプされていれば |0.25−0| ≤ 1.0 で受け入れられ、0.25 + 5。クランプされていなければ捨てられ、0のまま）。
 16. 再生中の `play(at:)` は位置を変えない：`noteMediaTime(10, at: 0)` の後 `play(at: 5)` で `position(at: 5) == 15`（基準を更新すると10に戻る）。
-17. 一時停止中の `pause(at:)`・停止中の `pause(at:)` は何もしない：`noteMediaTime(10, at: 0)`、`pause(at: 2)` の後に `pause(at: 100)` を呼んでも `position(at: 100) == 12`。`stop()` 後の `pause(at: 1)` で `mode == .stopped` のまま（`.paused` に変わらない）。
+17. 一時停止中の `pause(at:)`・停止中の `pause(at:)` は何もしない：`noteMediaTime(10, at: 0)`、`pause(at: 2)` の後に `pause(at: 100)` を呼んでも `position(at: 100) == 12`。`stop()` 後の `pause(at: 1)` で `mode == .stopped` のまま（`.paused` に変わらない）。前半は、ガードが無くても同じ値になるので、変異の検出は後半が担う。
 18. 最初の通知までは補間しない：`play(at: 0)` の後 `position(at: 3) == 0`。一時停止から戻る場合：`noteMediaTime(10, at: 0)`、`pause(at: 2)`（12で止まる）、`play(at: 20)` の後 `position(at: 21) == 12`。
 19. 最初の通知は無条件に受け入れる：上の続きで `noteMediaTime(11.8, at: 20.3)`（12との差0.2は、通常なら無視される範囲）で `position(at: 20.3) == 11.8`。
 20. 位置の跳びの検出（戻り値）：`play(at: 0)`、`noteMediaTime(10, at: 0)`（戻り値は使わない）、`noteMediaTime(30, at: 0.5)` が `true` で `position(at: 0.5) == 30`、続く `noteMediaTime(30.2, at: 0.75)`（`current == 30.25`、差0.05）が `false`、`noteMediaTime(29.9, at: 1.0)`（`current == 30.5`、後退0.6 > 0.5 で受け入れるが、差0.6 ≤ 1.0）も `false`。無視した通知（テスト8）も `false`。
 21. 後退の許容幅の境界：`noteMediaTime(10, at: 0)`、`noteMediaTime(10.0, at: 0.5)`（`current == 10.5`、後退ちょうど0.5）は無視されて `position(at: 0.5) == 10.5`。`noteMediaTime(9.9, at: 0.5)`（後退0.6）は受け入れて `position(at: 0.5) == 9.9`（別々のテストにする）。
 22. シークの待ちが解けたあとは通常の規則：`noteMediaTime(10, at: 0)`、`seek(to: 100, at: 1)`、`noteMediaTime(100.2, at: 1.3)`（受け入れ）、続けて `noteMediaTime(30, at: 1.4)`（目標から遠いが、待ちは解けているので受け入れる）で `position(at: 1.4) == 30`。
-23. 停止中のシークは何もしない：`stop()` の状態で `seek(to: 50, at: 1)`、`play(at: 2)`、`noteMediaTime(0.3, at: 2.1)` の後 `position(at: 2.1) == 0.3`（`pendingSeek` が残っていれば、通知が捨てられて `0` のまま）。
+23. 停止中のシークは何もしない：`stop()` の状態で `seek(to: 50, at: 1)`、`play(at: 2)`、`noteMediaTime(0.3, at: 2.1)` の後 `position(at: 2.1) == 0.3`（`seek` が効いていれば `anchorMedia = 50`・`pendingSeek` が残り、通知は捨てられて `position == 50` になる）。
+24. 一時停止中のシークでも、待ちの間の古い通知を捨てる（判定の順：`pendingSeek` が `.paused` より先）：`noteMediaTime(10, at: 0)`、`pause(at: 2)`、`seek(to: 50, at: 3)`、`noteMediaTime(12, at: 3.1)`（戻り値 `false`）の後 `position(at: 3.1) == 50`。
+25. 待ちが `awaitingFirstNote` より先：上の続きで `play(at: 3.2)`、`noteMediaTime(12, at: 3.3)`（捨てる）で `position(at: 3.3) == 50`、`noteMediaTime(50.1, at: 3.5)`（受け入れ）で `position(at: 3.5) == 50.1`。
+26. 閾値の境界：`noteMediaTime(10, at: 0)` の後 `noteMediaTime(11.5, at: 0.5)`（`current == 10.5`、差ちょうど1.0）の戻り値は `false`。別のテストで `noteMediaTime(11.6, at: 0.5)`（差1.1）は `true`。シークの許容幅：`noteMediaTime(10, at: 0)`、`seek(to: 100, at: 1)`、`noteMediaTime(101.0, at: 1.1)`（差ちょうど1.0）は受け入れて `position(at: 1.1) == 101`。
 
 ### 5.2 `PlaybackSpeed`
 
@@ -188,7 +194,7 @@ public enum PlaybackSpeed {
 }
 ```
 
-`label` は、ロケールに依存しない（小数点は常に `.`。`String(format:)`・`formatted()` ではなく、7段階の固定の対応表でよい）。整数なら小数点なし（`1x`・`2x`）、それ以外は末尾の0を落とした小数（`0.5x`・`0.75x`・`1.25x`）。テスト：7段階の各値の表示、`steps` が7要素で昇順で `1.0` を含むこと。
+`label` は、ロケールに依存しない（小数点は常に `.`。`String(format:)`・`formatted()` ではなく、7段階の固定の対応表でよい。7段階以外の値も同じ規則で整形する）。整数なら小数点なし（`1x`・`2x`）、それ以外は末尾の0を落とした小数（`0.5x`・`0.75x`・`1.25x`）。テスト：7段階の各値の表示、`steps` が7要素で昇順で `1.0` を含むこと。
 
 ### 5.3 `NowPlayingState`（ロック画面に出す情報）
 
@@ -221,14 +227,14 @@ public final class RotatingLog: @unchecked Sendable {
 }
 ```
 
-規則：`append` は、`line + "\n"` を UTF-8 にして、現在のファイルのサイズ＋書き込みサイズ が `maxBytes` を超えるなら、**現在のファイルが空でなければ**、先に**退避**する（空のファイルを退避すると、実際の内容が入った退避ファイルを消してしまうため。`backupURL` が既にあれば削除 → 現在のファイルを `backupURL` へ移動 → 新しい空ファイルを作る）。初期化時に、ファイルが無ければ作り、あれば末尾へ追記（`seekToEnd`）。書き込みの失敗は握りつぶす（ログがアプリを落とさない）。**1行が `maxBytes` より大きい場合も、その行は新しいファイルに書く**（無限に退避しない）。
+規則：`append` は、`line + "\n"` を UTF-8 にして、現在のファイルのサイズ＋書き込みサイズ が `maxBytes` を超えるなら、**現在のファイルが空でなければ**、先に**退避**する（空のファイルを退避すると、実際の内容が入った退避ファイルを消してしまうため。`backupURL` が既にあれば削除 → 現在のファイルを `backupURL` へ移動 → 新しい空ファイルを作り、**書き込み用のハンドルを閉じて開き直す**。閉じないと、移動した退避ファイルに書き続ける。現在のファイルのサイズは、メモリ上の書き込みバイト数で数え、初期化時に既存ファイルのサイズで初期化する）。初期化時に、ファイルが無ければ作り、あれば末尾へ追記（`seekToEnd`）。書き込みの失敗は握りつぶす（ログがアプリを落とさない）。**1行が `maxBytes` より大きい場合も、その行は新しいファイルに書く**（無限に退避しない）。
 
 テスト（一時ディレクトリで。`RotatingLogTests.swift`）：
 1. 初期化でファイルが作られる。
 2. `append` した行が順に読める。
-3. 上限を超える追記で、退避ファイルができ、現在のファイルは新しい行から始まる（`maxBytes: 100`、1行約30バイトを5行）。
+3. 上限を超える追記で、退避ファイルができ、現在のファイルは新しい行から始まる（`maxBytes: 100`、各行を改行込みでちょうど30バイトにして5行。3行（90バイト）の次の行で120 > 100 になり退避する）。
 4. 2回目の退避で、古い退避ファイルが置き換わる（退避ファイルは常に1つ）。
-5. 現在＋退避のサイズ合計が、`maxBytes` の約2倍を超えない。
+5. 現在＋退避のサイズ合計が、2×`maxBytes` 以下。
 6. `existingFileURLs` が、存在するファイルだけを、現在→退避の順で返す。
 7. 既存ファイルがあるとき、再初期化しても追記される（消えない）。
 8. `maxBytes` より大きい1行でも、落ちずに書かれる。新しいログ（空）への最初の1行なら、退避ファイルは作られない。普通の1行の後なら、その行が退避ファイルへ移り、大きい行が現在のファイルに入る。
@@ -249,7 +255,7 @@ public enum SupportedVideo {
 
 ### 6.1 起動と全体（`VLCWithChatApp.swift`・`AppModel.swift`）
 
-`AppModel`（`@Observable @MainActor final class`）が、`PlayerModel`・`DiagnosticsModel`・`RemoteControlController`・`AudioSessionController` を作って束ねる。`VLCWithChatApp` は `@State private var app = AppModel()` を持ち、`PlayerScreen(app: app)` を出す。**生成の順序（循環を避ける）：** ① `DiagnosticsModel`・`AudioSessionController` を作る → ② `PlayerModel(diagnostics:audioSession:)` を作る → ③ `RemoteControlController(handlers:)` を、`[weak player]` で `PlayerModel` の操作を呼ぶ `Handlers` で作る → ④ `player.remote = remote`（`PlayerModel` が `remote.update(_:)` を呼ぶための後付けの参照。`weak` ではなく `AppModel` が両方を保持する）→ ⑤ `audioSession.startObservingInterruptions()`、`diagnostics.start()`、`remote.update(nil)`（起動直後は、再生系のコマンドを無効にしておく）。
+`AppModel`（`@Observable @MainActor final class`）が、`PlayerModel`・`DiagnosticsModel`・`RemoteControlController`・`AudioSessionController` を作って束ねる。`VLCWithChatApp` は `@State private var app = AppModel()` を持ち、`PlayerScreen(app: app)` を出す。**生成の順序（循環を避ける）：** ① `DiagnosticsModel`・`AudioSessionController` を作る → ② `PlayerModel(diagnostics:audioSession:)` を作る（`AppModel.playback`） → ③ `RemoteControlController(handlers:)` を、`[weak playback]` で `PlayerModel` の操作を呼ぶ `Handlers` で作る → ④ `playback.remote = remote`（`PlayerModel` が `remote.update(_:)` を呼ぶための後付けの参照。`weak` ではなく `AppModel` が両方を保持する）→ ⑤ `audioSession.startObservingInterruptions()`、`diagnostics.start()`、`remote.update(nil)`（起動直後は、再生系のコマンドを無効にしておく）。
 
 - **VLCInstance：** `PlayerModel.init` が `try VLCInstance(appleAudioSessionPolicy: .applicationManaged)` を1回だけ作り、`Player(instance:)` を作る。**失敗しても `.shared` に戻さない**（M0と同じ）。失敗したら `player = nil`、`setupError` にエラーを入れ、画面は「ファイルを選択」を無効にして `setupError` を出す。`VLCInstance.shared` には、アプリ全体で一度も触れない。
 - **Info.plist・`project.yml`：** M0のまま（`UIBackgroundModes: audio`、`UIFileSharingEnabled`、`LSSupportsOpeningDocumentsInPlace` など）。`MediaPlayer` フレームワークは、`import MediaPlayer` だけでリンクされる（`project.yml` の変更は不要。CIで確かめる）。
@@ -258,16 +264,16 @@ public enum SupportedVideo {
 
 `@Observable @MainActor final class PlayerModel`。M0の `M0Model` から、再生・PiP・状態の監視を引き継ぎ、ブックマーク・音声セッションの切り替え・2系統のピッカーを削除する。
 
-公開する状態（`private(set)`）：`player: Player?`（`init` で一度だけ作る）、`setupError: String?`、`title: String?`（`SupportedVideo.title(fromFileName:)`）、`mode: PlaybackClock.Mode`（UIの切り替え用）、`rate: Double`、`duration: TimeInterval?`、`openError: String?`、`pip: PiPController?`。計算プロパティ：`isPlaybackRequestedActive: Bool { player?.isPlaybackRequestedActive ?? false }`（ボタンの表示用。`Player` が `@Observable` なので、画面が追跡する）。
+公開する状態（`private(set)`）：`player: Player?`（`init` で一度だけ作る）、`setupError: String?`、`title: String?`（`SupportedVideo.title(fromFileName:)`）、`mode: PlaybackClock.Mode`（UIの切り替え用）、`rate: Double`、`duration: TimeInterval?`、`openError: String?`、`pip: PiPController?`。計算プロパティ：`isPlaybackRequestedActive: Bool { player?.isPlaybackRequestedActive ?? false }`（ボタンの表示用。`Player` が `@Observable` なので、画面が追跡する）。**`mode` は、`clock` を変える操作（状態の通知・`timeChanged`・各操作）のたびに `mode = clock.mode` で書き写す。速度の情報源は `clock.rate` に一本化し、`rate`（表示用）と `NowPlayingState.rate` は `clock.rate` から作る。**
 内部（`@ObservationIgnored`）：`clock: PlaybackClock`、`currentFile: ScopedFile?`、`pipTask`。
 
 操作（すべて `@MainActor` のメソッド。画面・ロック画面・PiP後の同期が、同じ経路を使う）：
-- `open(url: URL)`：`ScopedFile(url:)` を作る → 拡張子が `SupportedVideo.isSupported` でなければ、`openError = "対応していない形式です"` にして終了（ログ。再生中の動画はそのまま）→ `audioSession.activate()`、`try player.play(url: file.url)`。**成功したときだけ**、`title` 設定、`clock.stop()`、`clock.setDuration(nil)`、`rate = 1.0`、古い `currentFile` を解放して `currentFile = file`、`remote.update(...)`（`await` を挟まないので、`play(url:)` の直後に届く状態の通知より前に実行される）。失敗したら `openError` に理由、ログ（再生中の動画・`title` はそのまま）。
+- `open(url: URL)`：`ScopedFile(url:)` を作る → 拡張子が `SupportedVideo.isSupported` でなければ、`openError = "対応していない形式です"` にして終了（ログ。再生中の動画はそのまま）→ `audioSession.activate()`、`try player.play(url: file.url)`。**成功したときだけ**、`title` 設定、`clock.stop()`、`clock.setDuration(nil)`、`duration = nil`、**速度を1.0に戻す**（SwiftVLCは動画を差し替えても速度を引き継ぐので、`try? player.setPlaybackRate(PlaybackRate(1.0))`・`clock.setRate(1.0, at: now)`・`rate = 1.0` の3つを通す）、古い `currentFile` を解放して `currentFile = file`、`remote.update(...)`（`await` を挟まないので、`play(url:)` の直後に届く状態の通知より前に実行される）。失敗したら `openError` に理由、ログ。**`Player.play` は失敗の前に古い動画を外す**ので、停止扱いにする：`clock.stop()`、`duration = nil`、`title = nil`、`currentFile = nil`、`remote.update(nil)`。
 - `togglePlayPause()`：`audioSession.activateLoggingFailure()` の後 `player.togglePlayPause()`。
 - `play()`・`pause()`：ロック画面の再生・一時停止用。`play()` は、**まず `player.state` を見る**：`.stopped`/`.idle` なら（`isPlaybackRequestedActive` の値によらず）`audioSession.activateLoggingFailure()` の後 `try? player.play()`（先頭から）。`.stopping`/`.error` なら何もしない。それ以外は、`isPlaybackRequestedActive` が真なら何もしない（`togglePlayPause()` は、すでに再生中のときに一時停止してしまうため使わない）。偽なら `audioSession.activateLoggingFailure()` の後 `player.resume()`。`pause()` は、`isPlaybackRequestedActive` が偽なら何もしない。真なら `player.pause()`。
 - `skip(seconds: Int)`：`player.jump(by: .seconds(seconds))` を呼び、戻り値が `true` のときだけ `clock.seek(to: clock.position(at: now) + Double(seconds), at: now)`（戻り値をログ。`false` は、停止中・シーク不可）。範囲外へは `PlaybackClock` がクランプ。**`skip`・`seek`・`setRate` の直後に、M0と同じく `IntervalStats` を `reset`**（操作直後の間隔の外れ値を、集計に入れない）。**`clock` を動かした後は `remote.update(makeNowPlayingState())`**。
-- `seek(toSeconds: Double)`：`duration` が無ければ何もしない。`player.seek(to: PlaybackPosition(seconds / duration))` が成功したときだけ `clock.seek(to:at:)`（失敗はログ）。
-- `setRate(_ speed: Double)`：`try player.setPlaybackRate(PlaybackRate(Float(speed)))` が成功したときだけ `clock.setRate(speed, at: now)`、`rate = speed`（失敗はログ）。
+- `seek(toSeconds: Double)`：`duration` が無ければ何もしない。`player.seek(to: PlaybackPosition(seconds / duration))` が成功したときだけ `clock.seek(to:at:)`、続けて `remote.update(...)`（失敗はログ）。
+- `setRate(_ speed: Double)`：`try player.setPlaybackRate(PlaybackRate(Float(speed)))` が成功したときだけ `clock.setRate(speed, at: now)`、`rate = speed`、続けて `remote.update(...)`（失敗はログ）。
 - `displayPosition(at: TimeInterval) -> Double`：`clock.position(at:)`。UIの `TimelineView` が呼ぶ。
 - `startPiP()`：M0の `startPiP()` と同じ（`toggleReportingStartResult()`。結果をログ）。
 - `attachPiP(_ controller: PiPController?)`・`sceneDidChange(isActive:name:)`：M0の同名メソッド（226行・270行）を引き継ぐ。`attachPiP` は、PiPのイベント（`pipEventEnvelopes`）をログに書き、`diagnostics.pipActive` を更新する。
@@ -310,7 +316,7 @@ M0の `activateAudioSessionIfAppManaged`・中断の監視を移す。**アプ�
 
 - 初期化で `MPRemoteCommandCenter.shared()` に、`playCommand`・`pauseCommand`・`togglePlayPauseCommand`・`skipForwardCommand`（`preferredIntervals = [10]`）・`skipBackwardCommand`（`[10]`）・`changePlaybackPositionCommand` のハンドラを登録する。**`nextTrackCommand`・`previousTrackCommand`・`seekForwardCommand`・`seekBackwardCommand` は `isEnabled = false`**。トークンは保持する（`deinit` で `removeTarget`）。
 - ハンドラは、**メインスレッドの保証が無い**ので、`Task { @MainActor in handlers.xxx() }` で渡し、すぐ `.success` を返す。`changePlaybackPositionCommand` のハンドラは `event as? MPChangePlaybackPositionCommandEvent` で `positionTime` を取り、取れなければ `.commandFailed`。スキップは `MPSkipIntervalCommandEvent.interval` を使う。**`interval` は、戻る側でも正の値で届く**ので、`skipForwardCommand` は `+Int(interval)`、`skipBackwardCommand` は `-Int(interval)` を渡す（取れなければ10）。**各ハンドラは、`AppLog` に `操作 リモート <play|pause|toggle|skip(±n)|seek(n)>` を書く**（PiPの窓の操作と見分けるため）。`Thread.isMainThread` をログに1回出す（U7）。
-- `update(_ state:)`：`state` があれば、`nowPlayingInfo = [MPMediaItemPropertyTitle: title, MPMediaItemPropertyPlaybackDuration: duration（あれば）, MPNowPlayingInfoPropertyElapsedPlaybackTime: state.elapsedForSystem, MPNowPlayingInfoPropertyPlaybackRate: state.rateForSystem, MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0]` を設定し、`playbackState = state.isPlaying ? .playing : .paused`、各コマンドを `isEnabled = true`。`nil` なら `nowPlayingInfo = nil`、`playbackState = .stopped`。
+- `update(_ state:)`：`state` があれば、`nowPlayingInfo = [MPMediaItemPropertyTitle: title, MPMediaItemPropertyPlaybackDuration: duration（あれば）, MPNowPlayingInfoPropertyElapsedPlaybackTime: state.elapsedForSystem, MPNowPlayingInfoPropertyPlaybackRate: state.rateForSystem, MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0]` を設定し、`playbackState = state.isPlaying ? .playing : .paused`、各コマンドを `isEnabled = true`。`nil` なら `nowPlayingInfo = nil`、`playbackState = .stopped`、再生系コマンド（play・pause・toggle・skip・changePlaybackPosition）を `isEnabled = false`。
 - **更新のタイミング：** 状態が変わるとき（`stateTransitions`）、シーク・速度変更・スキップの直後、動画を開いたとき、`.lengthChanged`（長さが分かったとき）。**`timeChanged` ごとには更新しない**（システムが経過時間を `elapsed` と `rate` から自分で進めるため）。位置のずれが大きくなる場合（U2）は、60秒ごとの再同期を `DiagnosticsModel` の1秒タイマーに乗せて追加する。
 - `PlayerModel` は `NowPlayingState` を `makeNowPlayingState()` で作る（`title` が無ければ `nil`）。
 
@@ -323,7 +329,7 @@ M0の `activateAudioSessionIfAppManaged`・中断の監視を移す。**アプ�
 
 ### 6.6 画面
 
-- **`PlayerScreen`：** `VStack`（縦のみ）。上：動画（`ZStack`：黒背景＋`PiPVideoView(player, controller: $pip)`。**`startsAutomaticallyFromInline` は既定の `true` のまま。`.id()` で作り直さない**。`aspectRatio(16/9)`）。動画の上に、透明な `Color.clear` に `.contentShape(Rectangle())` を付けて重ね、`onTapGesture { model.togglePlayPause() }`（動画のタップで再生/一時停止。`.contentShape` が無いと、透明な領域はタップに反応しない）。中：`ControlsView`。下：空白（M2のチャット欄の場所）。最下部：`DiagnosticsView` の1行。**`PiPVideoView` は、`player` が作られた時点（アプリ起動時）から常に置く**（動画を選んだ後に初めて作ると、描画面の引き継ぎの問題（D7）が起きる）。動画が未選択のときは、その黒い領域に重ねて「ファイルを選択」ボタンだけを出す（初回起動時）。`.fileImporter(isPresented:allowedContentTypes: [.item])` の結果で `model.open(url:)`。`openError` があれば `.alert`。`.onChange(of: pip.map { ObjectIdentifier($0) })` で `model.attachPiP(pip)`（M0と同じ）。`scenePhase` の変化で `model.sceneDidChange`。
+- **`PlayerScreen`：** `VStack`（縦のみ）。上：動画（`ZStack`：黒背景＋`PiPVideoView(player, controller: $pip)`。**`startsAutomaticallyFromInline` は既定の `true` のまま。`.id()` で作り直さない**。`aspectRatio(16/9)`）。動画の上に、透明な `Color.clear` に `.contentShape(Rectangle())` を付けて重ね、`onTapGesture { model.togglePlayPause() }`（動画のタップで再生/一時停止。`.contentShape` が無いと、透明な領域はタップに反応しない）。中：`ControlsView`。下：空白（M2のチャット欄の場所）。最下部：`DiagnosticsView` の1行。**`PiPVideoView` は、`player` が作られた時点（アプリ起動時）から常に置く**（動画を選んだ後に初めて作ると、描画面の引き継ぎの問題（D7）が起きる）。動画が未選択のときは、その黒い領域に重ねて「ファイルを選択」ボタンだけを出す（初回起動時。`ControlsView` は動画を開くまで非表示）。`.fileImporter(isPresented:allowedContentTypes: [.item])` の結果で `model.open(url:)`。`openError` があれば `.alert`。`.onChange(of: pip.map { ObjectIdentifier($0) })` で `model.attachPiP(pip)`（M0と同じ）。`scenePhase` の変化で `model.sceneDidChange`。
 - **`ControlsView`：** 再生/一時停止（`isPlaybackRequestedActive` で `pause.fill`／`play.fill`）、10秒戻る（`gobackward.10`）・10秒進む（`goforward.10`）、「ファイルを選択」（開き直し）、速度（`Menu` に `PlaybackSpeed.steps` の7段階。現在値を表示）、PiPボタン（`pip.enter`。`startPiP()`）、シークバー（`Slider`。つまみを掴んだ瞬間に現在位置から動き出す。離したとき1回だけ `seek`。M0の `M0View` の方式）、現在位置/長さ（`mm:ss` または `h:mm:ss`）。**現在位置とシークバーの位置は、`TimelineView(.periodic(from: .now, by: 0.1))` の中で `model.displayPosition(at: ProcessInfo.processInfo.systemUptime)` を読んで描画する**（`TimelineView` の `Date` ではなく、`PlaybackClock` に渡す `at` と同じ単調増加の秒を使う。**再生中でなくても動かし続ける**：`PlaybackClock` は `@ObservationIgnored` なので、一時停止中のシークや停止（位置0）は、タイマーの次の刻みで画面に出る。0.1秒周期の小さな再描画の負荷は無視できる）。`duration` が `nil` の間は、シークバーを無効にする。これで、`timeChanged` の通知頻度に画面全体が引きずられない。全ボタンに `accessibilityLabel` を付ける（00 項目9）。
 - **`DiagnosticsView`：** 最下部に小さい1行（`状態 playing ・ 295MB ・ PiP`）。タップで `.sheet`：状態・メモリ・時刻通知の間隔（`IntervalStats.Snapshot` の整形は M0 の `summaryText`）・PiPの有無・直近のエラー・バージョン（build・SwiftVLC・libVLC）と、`ShareLink(items: AppLog.shared.existingFileURLs)`（「ログを共有」）。
 - **画面を消さない：** 再生中のみ `isIdleTimerDisabled = true`（6.2節の状態の監視で更新）。背面に回るとき（`scenePhase != .active`）は `false`、前面に戻って再生中なら `true`（M0の `sceneDidChange` と同じ）。
@@ -339,7 +345,7 @@ SwiftVLCは `.stopping` → `.stopped` に遷移する。`stateTransitions` の 
 | D1 | 現在位置は `PlaybackClock` で補間し、画面は `TimelineView`（0.1秒）で描く | `timeChanged` は約4Hz（M0実機）。`Player.currentTime` を直接読むと、位置が約260msごとに跳び、`@Observable` の更新で画面全体が再評価される（M0のレビューで指摘）。M2のチャット同期も、同じ補間値を使う | `Player.currentTime` を直接表示（跳ぶ）、`CADisplayLink`（UIKit依存が増え、テストしにくい） |
 | D2 | 補間のロジックを、SwiftVLCに依存しない `VLCChatCore` に置く | CIの `swift test` で、実機なしに期待値を検算できる。libVLCのコピーが2つできる事故も避ける | アプリ側に置く（テストできない） |
 | D3 | ロック画面の更新は、状態の変化・シーク・速度変更・長さ確定・`PlaybackClock` が位置の跳びを検出したときだけ。`timeChanged` ごとには更新しない | システムが `elapsed` と `rate` から自分で進める設計のため。更新頻度を増やすと、ロック画面の表示がちらつく可能性がある | 毎秒更新（無駄。U2で必要になったら60秒ごとの再同期を足す） |
-| D4 | 再生・一時停止・位置の更新を、`stateTransitions` と各操作の1経路に集める | PiPの窓の操作・ロック画面の操作・SwiftVLC内部の再開は、画面のボタンを通らない。状態の変化を一次情報にすれば、出どころによらず一致する（U3） | 操作ごとに個別に更新（PiPの窓の操作が漏れる） |
+| D4 | 再生・一時停止・位置の更新を、`stateTransitions` と各操作の1経路に集める | PiPの窓の操作・ロック画面の操作・SwiftVLC内部の再開は、画面のボタンを通らない。状態の変化を一次情報にすれば、出どころによらず一致する（U3） | 操作ごとに個別に更新（PiPの窓の操作が漏れる）。`playbackStatus`（状態＋世代）は採らない：動画の差し替えで `.playing` が2回届いても `clock.play(at:)` は冪等で害がなく、世代の選別が要るのは位置の通知だけ |
 | D5 | ボタンの表示は `isPlaybackRequestedActive`（`player` の計算プロパティ）、位置の補間とロック画面は `clock.mode` | 前者は、一時停止の要求が処理中でも画面が揃う（SwiftVLCの設計）。後者は、実際の再生の進みを表す | `player.state` だけを見る（要求が処理中のとき、ボタンが遅れる） |
 | D6 | `VLCChatCore` は `SwiftVLC` に依存させない | libVLCのコピーが2つできると未定義動作（M0から引き継ぎ） | PackageからSwiftVLCを使う |
 | D7 | `PiPVideoView` を作り直さない（`.id` を付けない）。自動PiPは既定の `true` | 再生後の作り直しでは、SwiftVLCが既存の描画面を引き継ぐため、値が反映されない（M0のレビュー）。PiPをオフにする使い方は想定しない（ユーザーの決定） | スイッチ（撤去済み） |
@@ -354,7 +360,7 @@ SwiftVLCは `.stopping` → `.stopped` に遷移する。`stateTransitions` の 
 | チェック | 内容 | 報告してほしいこと |
 |---|---|---|
 | A（受け入れ1） | 動画を選んで再生（MP4・MOV・WebM・MKV）。機内モードでも。`.json` など動画以外を選ぶと「対応していない形式です」と出る | 各形式の結果。エラー表示 |
-| B（2・3・8） | 再生/一時停止、シークバー、10秒戻る・進む、速度7段階（音程）、動画のタップ。現在位置の表示が滑らか（0.1秒刻みで進む）。一時停止中のシーク、速度変更の直後に、位置が飛ばない。動画を最後まで再生すると、停止して先頭に戻り、再生ボタンで先頭から再生される | 位置が飛んだ場面（操作と動画）、終了時の挙動 |
+| B（2・3・8） | 再生/一時停止、シークバー、10秒戻る・進む、速度7段階（音程）、動画のタップ。現在位置の表示が滑らか（0.1秒刻みで進む）。一時停止中のシーク、速度変更の直後に、位置が飛ばない。10秒進むの連打で、位置が行き過ぎて戻らない。2倍速のまま別の動画を開くと、速度表示が1xに戻り、実際も1倍で再生される。動画を最後まで再生すると、停止して先頭に戻り、再生ボタンで先頭から再生される | 位置が飛んだ場面（操作と動画）、終了時の挙動 |
 | C（4） | PiPなしで、画面ロック・他アプリへ切り替え：音声が続くか。**一時停止したまま背面→復帰して、勝手に再開しないか**（複数回）。アラームなどで中断された後、自動で音が戻らなくても、再生ボタンで戻るか。イヤホンの抜き差し・Bluetoothの接続のあとの挙動 | 結果。再開した場合は時刻 |
 | D（5） | PiPをボタンと自動（ホームへ戻る）で起動。PiPの窓の再生/一時停止・スキップの後、アプリの再生状態・位置・ロック画面の表示が一致するか。**ロック→PiPなしで中断された状態から、PiPの窓の再生ボタンで音が戻るか**（アプリ管理の音声セッションを、状態の変化で有効にする経路の確認） | 不一致の場面 |
 | E（6） | ロック画面とコントロールセンターに、10秒戻る・再生/一時停止・10秒進むが出るか。各操作が効くか。シークバーのドラッグ。位置と速度の表示（倍速で再生して確認）。PiPの窓の操作との競合 | スクリーンショット。効かない操作 |
@@ -366,6 +372,7 @@ SwiftVLCは `.stopping` → `.stopped` に遷移する。`stateTransitions` の 
 
 - タグの条件（`on.push.tags`）を、`m0-*` から `m[0-9]-*` に変える（`m1-1` などを通す。GitHubのタグのglobで `[0-9]` が使える）。**「Releaseを作る」ステップの `if: startsWith(github.ref, 'refs/tags/m0-')` も、`startsWith(github.ref, 'refs/tags/m')` に変える**（変えないと、`m1-*` ではReleaseが作られない）。**この変更を最初のコミットにして、動作確認用のタグを切る前に、CIでYAMLの構文を確かめる。**
 - Releaseのnotesの1行目「M0（実現性の確認）用のビルドです。」を「iPhone実機での確認用のビルドです。一般向けの配布ではありません。」に変える。LGPLの記述は、そのまま残す（公開Release。libvlc入りのipaを置くため）。
+- ワークフロー内のコメントに残る `m0-*` の記述も直す。
 - それ以外（Xcodeの固定、キャッシュ、`make-ipa.sh`）は変更しない。
 
 ### 9.2 品質管理
