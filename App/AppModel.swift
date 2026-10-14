@@ -29,6 +29,7 @@ final class AppModel {
     )
     playback.remote = remote
     audioSession.stateDescription = { [weak playback] in playback?.stateDescription ?? "状態=-" }
+    audioSession.onDisruption = { [weak playback] disruption in playback?.audioDisruption(disruption) }
 
     self.diagnostics = diagnostics
     self.playback = playback

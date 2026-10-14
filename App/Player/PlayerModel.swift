@@ -19,6 +19,8 @@ final class PlayerModel {
   private(set) var duration: TimeInterval?
   private(set) var openError: String?
   private(set) var pip: PiPController?
+  /// 動画を開くのに成功するたびに増える（画面側の状態のリセット用）。
+  private(set) var openCount = 0
 
   /// 再生/一時停止ボタンの表示用。一時停止の要求が処理中でも、画面が揃う。
   var isPlaybackRequestedActive: Bool { player?.isPlaybackRequestedActive ?? false }
@@ -28,6 +30,10 @@ final class PlayerModel {
   @ObservationIgnored private var clock = PlaybackClock()
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
+  /// 中断・経路の消失の後は、音声出力が無音のまま残る（M1実機）。次に再生が始まるとき作り直す。
+  @ObservationIgnored private var needsAudioRestart = false
+  /// 中断の開始で、こちらが一時停止した。終了時に `shouldResume` なら再開する。
+  @ObservationIgnored private var pausedByInterruption = false
   @ObservationIgnored private let diagnostics: DiagnosticsModel
   @ObservationIgnored private let audioSession: AudioSessionController
 
@@ -103,6 +109,7 @@ final class PlayerModel {
     if player.state == .playing { clock.play(at: now) }
     // 古いファイルのスコープは、新しい再生を始めてから解放する。
     currentFile = file
+    openCount += 1
     syncClockState()
     updateRemote()
   }
@@ -116,6 +123,7 @@ final class PlayerModel {
 
   func togglePlayPause() {
     AppLog.write("操作 togglePlayPause")
+    pausedByInterruption = false
     audioSession.activateLoggingFailure()
     player?.togglePlayPause()
   }
@@ -124,6 +132,7 @@ final class PlayerModel {
   func play() {
     guard let player else { return }
     AppLog.write("操作 play")
+    pausedByInterruption = false
     switch player.state {
     case .stopped, .idle:
       audioSession.activateLoggingFailure()
@@ -190,6 +199,42 @@ final class PlayerModel {
     clock.position(at: uptime)
   }
 
+  // MARK: - 音声の中断
+
+  /// 中断の開始では、アプリ管理の音声セッションだと SwiftVLC は一時停止しない
+  /// （映像だけが進み、音声出力が止まる）。こちらで一時停止する。
+  func audioDisruption(_ disruption: AudioSessionController.Disruption) {
+    switch disruption {
+    case .interruptionBegan:
+      needsAudioRestart = true
+      if let player, player.isPlaybackRequestedActive {
+        pausedByInterruption = true
+        AppLog.write("中断のため一時停止")
+        player.pause()
+      }
+    case .interruptionEnded(let shouldResume):
+      if shouldResume, pausedByInterruption {
+        pausedByInterruption = false
+        AppLog.write("中断が終わったので再開")
+        play()
+      }
+    case .routeLost:
+      // SwiftVLC が一時停止する。再開のときに音声出力を作り直す。
+      needsAudioRestart = true
+    }
+  }
+
+  /// 音声トラックの選択を外して付け直し、音声出力を作り直す。
+  private func restartAudioOutput() {
+    guard let player, let track = player.selectedAudioTrack else {
+      AppLog.write("音声出力を再起動できない: 選択中の音声トラックなし")
+      return
+    }
+    AppLog.write("音声出力を再起動")
+    player.selectedAudioTrack = nil
+    player.selectedAudioTrack = track
+  }
+
   // MARK: - PiP
 
   func attachPiP(_ controller: PiPController?) {
@@ -220,7 +265,7 @@ final class PlayerModel {
 
   func sceneDidChange(isActive: Bool, name: String) {
     // ロック検知の通知はパスコード設定時にしか届かないので、前面復帰時の状態もここに残す。
-    AppLog.write("画面 \(name) \(stateDescription)")
+    AppLog.write("画面 \(name) \(stateDescription) PiP可=\(pip?.isPossible ?? false)")
     // 前面に戻ったときは、再生中なら画面を消さない状態に戻す。
     UIApplication.shared.isIdleTimerDisabled = isActive && player?.state == .playing
   }
@@ -292,6 +337,13 @@ final class PlayerModel {
       audioSession.activateLoggingFailure()
     default:
       break
+    }
+    if state == .playing {
+      pausedByInterruption = false
+      if needsAudioRestart {
+        needsAudioRestart = false
+        restartAudioOutput()
+      }
     }
     switch state {
     case .playing:
