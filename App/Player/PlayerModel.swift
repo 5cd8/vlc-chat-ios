@@ -1,0 +1,342 @@
+import AVFoundation
+import Observation
+import SwiftVLC
+import UIKit
+import VLCChatCore
+
+/// 再生・補間した現在位置・PiP・状態の監視。画面、ロック画面、PiPの窓の操作は、
+/// すべてこのクラスの状態（`player.stateTransitions` と各操作）を通して一致させる。
+@Observable
+@MainActor
+final class PlayerModel {
+  private(set) var player: Player?
+  private(set) var setupError: String?
+  private(set) var libVLCVersion: String?
+  private(set) var title: String?
+  /// 診断表示用。ボタンは `isPlaybackRequestedActive`、補間は `clock` を直接使う。
+  private(set) var mode: PlaybackClock.Mode = .stopped
+  private(set) var rate: Double = PlaybackSpeed.normal
+  private(set) var duration: TimeInterval?
+  private(set) var openError: String?
+  private(set) var pip: PiPController?
+
+  /// 再生/一時停止ボタンの表示用。一時停止の要求が処理中でも、画面が揃う。
+  var isPlaybackRequestedActive: Bool { player?.isPlaybackRequestedActive ?? false }
+
+  /// `AppModel` が後付けする（ロック画面の表示を更新するため）。
+  @ObservationIgnored var remote: RemoteControlController?
+  @ObservationIgnored private var clock = PlaybackClock()
+  @ObservationIgnored private var currentFile: ScopedFile?
+  @ObservationIgnored private var pipTask: Task<Void, Never>?
+  @ObservationIgnored private let diagnostics: DiagnosticsModel
+  @ObservationIgnored private let audioSession: AudioSessionController
+
+  init(diagnostics: DiagnosticsModel, audioSession: AudioSessionController) {
+    self.diagnostics = diagnostics
+    self.audioSession = audioSession
+
+    // 失敗しても .shared に戻さない。アプリ管理のときに .shared へ触れると、
+    // ライブラリ管理のインスタンスが生成されてしまう。
+    do {
+      let instance = try VLCInstance(appleAudioSessionPolicy: .applicationManaged)
+      libVLCVersion = instance.version
+      player = Player(instance: instance)
+    } catch {
+      setupError = "VLCInstance の作成に失敗: \(error)"
+      AppLog.write(setupError ?? "")
+    }
+    startObserving()
+    observeProtectedData()
+  }
+
+  // MARK: - 開く
+
+  func dismissOpenError() {
+    openError = nil
+  }
+
+  func open(url: URL) {
+    openError = nil
+    guard let player else { return }
+    let file = ScopedFile(url: url)
+    let sizeMB = file.fileSizeBytes.map { String(format: "%.1fMB", Double($0) / 1_048_576) } ?? "不明"
+    AppLog.write("選択 \(url.path) startAccessing=\(file.didStartAccess) サイズ=\(sizeMB)")
+
+    guard SupportedVideo.isSupported(pathExtension: url.pathExtension) else {
+      // 再生中の動画はそのままにする。
+      reportOpenError("対応していない形式です")
+      return
+    }
+    do {
+      try audioSession.activate()
+    } catch {
+      reportOpenError("音声セッションの有効化に失敗: \(error)")
+      return
+    }
+    do {
+      try player.play(url: file.url)
+    } catch {
+      reportOpenError("再生開始に失敗: \(error)")
+      // 差し替えに失敗しても古い動画は再生を続けるが、古い動画が外れた状態（.idle/.error）なら停止扱いにする。
+      if player.state == .idle || player.state == .error {
+        clock.stop()
+        clock.setDuration(nil)
+        duration = nil
+        title = nil
+        currentFile = nil
+        syncClockState()
+        remote?.update(nil)
+      }
+      return
+    }
+    // ここまで await を挟まないので、play(url:) の直後に届く状態の通知より前に実行される。
+    title = SupportedVideo.title(fromFileName: url.lastPathComponent)
+    clock.stop()
+    clock.setDuration(nil)
+    duration = nil
+    // SwiftVLC は動画を差し替えても速度を引き継ぐので、1.0に戻す。
+    try? player.setPlaybackRate(PlaybackRate(Float(PlaybackSpeed.normal)))
+    clock.setRate(PlaybackSpeed.normal, at: now)
+    diagnostics.resetTimeStats()
+    // 古いファイルのスコープは、新しい再生を始めてから解放する。
+    currentFile = file
+    syncClockState()
+    updateRemote()
+  }
+
+  private func reportOpenError(_ message: String) {
+    openError = message
+    diagnostics.reportError(message)
+  }
+
+  // MARK: - 操作
+
+  func togglePlayPause() {
+    AppLog.write("操作 togglePlayPause")
+    audioSession.activateLoggingFailure()
+    player?.togglePlayPause()
+  }
+
+  /// ロック画面の再生。`togglePlayPause()` は、すでに再生中のときに一時停止してしまうため使わない。
+  func play() {
+    guard let player else { return }
+    AppLog.write("操作 play")
+    switch player.state {
+    case .stopped, .idle:
+      audioSession.activateLoggingFailure()
+      try? player.play()
+    case .stopping, .error:
+      break
+    default:
+      guard !player.isPlaybackRequestedActive else { return }
+      audioSession.activateLoggingFailure()
+      player.resume()
+    }
+  }
+
+  func pause() {
+    guard let player, player.isPlaybackRequestedActive else { return }
+    AppLog.write("操作 pause")
+    player.pause()
+  }
+
+  func skip(seconds: Int) {
+    guard let player else { return }
+    diagnostics.resetTimeStats()
+    let accepted = player.jump(by: .seconds(seconds))
+    AppLog.write("操作 jump(\(seconds)) 戻り値=\(accepted)")
+    guard accepted else { return }
+    let at = now
+    clock.seek(to: clock.position(at: at) + Double(seconds), at: at)
+    syncClockState()
+    updateRemote()
+  }
+
+  func seek(toSeconds seconds: Double) {
+    guard let player, let duration, duration > 0 else { return }
+    diagnostics.resetTimeStats()
+    do {
+      try player.seek(to: PlaybackPosition(seconds / duration))
+      AppLog.write("操作 seek \(String(format: "%.1f", seconds))s")
+    } catch {
+      AppLog.write("操作 seek 失敗: \(error)")
+      return
+    }
+    clock.seek(to: seconds, at: now)
+    syncClockState()
+    updateRemote()
+  }
+
+  func setRate(_ speed: Double) {
+    guard let player else { return }
+    diagnostics.resetTimeStats()
+    do {
+      try player.setPlaybackRate(PlaybackRate(Float(speed)))
+      AppLog.write("操作 setPlaybackRate(\(speed))")
+    } catch {
+      AppLog.write("操作 setPlaybackRate 失敗: \(error)")
+      return
+    }
+    clock.setRate(speed, at: now)
+    syncClockState()
+    updateRemote()
+  }
+
+  /// 補間した現在位置。UIの `TimelineView` が呼ぶ。
+  func displayPosition(at uptime: TimeInterval) -> Double {
+    clock.position(at: uptime)
+  }
+
+  // MARK: - PiP
+
+  func attachPiP(_ controller: PiPController?) {
+    pipTask?.cancel()
+    pip = controller
+    diagnostics.pipActive = controller?.isActive ?? false
+    guard let controller else { return }
+    AppLog.write("PiPController 取得 isPossible=\(controller.isPossible)")
+    pipTask = Task { [weak self] in
+      for await envelope in controller.pipEventEnvelopes {
+        guard let self else { return }
+        let cause = envelope.stopCause.map(String.init(describing:)) ?? "-"
+        AppLog.write("PiPイベント \(envelope.event) cause=\(cause)")
+        self.diagnostics.pipActive = controller.isActive
+      }
+    }
+  }
+
+  func startPiP() {
+    guard let pip else {
+      AppLog.write("PiP toggle: PiPController なし")
+      return
+    }
+    let result = pip.toggleReportingStartResult()
+    let text = result.map(String.init(describing:)) ?? "停止した"
+    AppLog.write("PiP toggle 結果=\(text) isPossible=\(pip.isPossible) isActive=\(pip.isActive)")
+  }
+
+  func sceneDidChange(isActive: Bool, name: String) {
+    // ロック検知の通知はパスコード設定時にしか届かないので、前面復帰時の状態もここに残す。
+    AppLog.write("画面 \(name) \(stateDescription)")
+    // 前面に戻ったときは、再生中なら画面を消さない状態に戻す。
+    UIApplication.shared.isIdleTimerDisabled = isActive && player?.state == .playing
+  }
+
+  /// ログに添える「状態=… 時間=…」。
+  var stateDescription: String {
+    guard let player else { return "状態=-" }
+    return "状態=\(player.state) 時間=\(String(format: "%.1f", clock.position(at: now)))s"
+  }
+
+  // MARK: - 状態の監視
+
+  private func startObserving() {
+    guard let player else { return }
+    // 既定の events は .newest(64) で取りこぼし得るので、必要な種類だけを通す unbounded にする。
+    let envelopes = player.eventEnvelopes(policy: .unbounded) { envelope in
+      switch envelope.event {
+      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError: true
+      default: false
+      }
+    }
+    Task { [weak self] in
+      for await envelope in envelopes {
+        self?.handle(envelope)
+      }
+    }
+    Task { [weak self] in
+      for await state in player.stateTransitions {
+        self?.stateDidChange(state)
+      }
+    }
+  }
+
+  private func handle(_ envelope: PlayerEventEnvelope) {
+    // 前の動画の残りの通知が、新しい動画の位置を汚さないようにする。
+    guard let player, envelope.playbackGeneration == player.generation else { return }
+    switch envelope.event {
+    case .timeChanged(let time):
+      let seconds = Self.seconds(time)
+      // 状態によらず時計に渡す。停止中は時計が無視し、一時停止中の通知は権威のある値として受け入れる。
+      let jumped = clock.noteMediaTime(seconds, at: now)
+      diagnostics.recordNoteDelta(clock.lastNoteDelta)
+      // 間隔の集計には、再生中の通知だけを入れる。
+      if clock.mode == .playing { diagnostics.recordTime(mediaSeconds: seconds) }
+      // PiPの窓のスキップなど、アプリを通らない位置の跳びを、ロック画面に反映する。
+      if jumped { updateRemote() }
+    case .lengthChanged(let length):
+      clock.setDuration(Self.seconds(length))
+      duration = clock.duration
+      updateRemote()
+    case .voutChanged(let count):
+      AppLog.write("voutChanged \(count)")
+    case .encounteredError:
+      diagnostics.reportError("encounteredError")
+    default:
+      break
+    }
+  }
+
+  private func stateDidChange(_ state: PlayerState) {
+    // PiPの窓の再生/一時停止・スキップは、画面のボタンと違い「操作」の行を通らない。
+    // 状態の変化がアプリの操作かPiP側の操作かを、ログから切り分けられるようPiPの有無を添える。
+    AppLog.write("状態 \(state) PiP=\(pip?.isActive == true ? "表示中" : "なし")")
+    UIApplication.shared.isIdleTimerDisabled = (state == .playing)
+
+    switch state {
+    case .opening, .buffering, .playing:
+      // アプリ管理では、PiPの窓の再生操作や中断明けの再開は音声セッションを有効にしない。
+      audioSession.activateLoggingFailure()
+    default:
+      break
+    }
+    switch state {
+    case .playing:
+      clock.play(at: now)
+      // 一時停止・シークからの復帰で空白がmaxに入らないようにする。
+      diagnostics.resetTimeStats()
+    case .paused:
+      clock.pause(at: now)
+    case .stopped, .idle, .error:
+      clock.stop()
+    default:
+      // .opening / .buffering / .stopping では時計を変えない。
+      break
+    }
+    syncClockState()
+    updateRemote()
+  }
+
+  private func observeProtectedData() {
+    let center = NotificationCenter.default
+    let names: [(Notification.Name, String)] = [
+      (UIApplication.protectedDataWillBecomeUnavailableNotification, "ロックを検知(protectedDataWillBecomeUnavailable)"),
+      (UIApplication.protectedDataDidBecomeAvailableNotification, "ロック解除を検知(protectedDataDidBecomeAvailable)")
+    ]
+    for (name, label) in names {
+      Task { [weak self] in
+        for await _ in center.notifications(named: name) {
+          guard let self else { return }
+          AppLog.write("\(label) \(self.stateDescription)")
+        }
+      }
+    }
+  }
+
+  // MARK: - 内部
+
+  private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
+
+  private func syncClockState() {
+    mode = clock.mode
+    rate = clock.rate
+  }
+
+  private func updateRemote() {
+    remote?.update(NowPlayingState.make(title: title, clock: clock, at: now))
+  }
+
+  private static func seconds(_ duration: Duration) -> Double {
+    Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+  }
+}
