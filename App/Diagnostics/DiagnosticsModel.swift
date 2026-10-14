@@ -12,6 +12,10 @@ final class DiagnosticsModel {
   private(set) var timeStats: IntervalStats.Snapshot?
   private(set) var lastError: String?
   var pipActive = false
+  /// 最後に通知された `scenePhase`（"active" / "inactive" / "background"）。負荷のログに添える。
+  var scenePhaseName = "active"
+  /// 負荷のログに添える再生状態。`PlayerModel` が結ぶ。
+  @ObservationIgnored var playbackStateText: @MainActor () -> String = { "-" }
   /// 「build … / SwiftVLC … / libVLC …」。`AppModel` が起動時に作って渡す。
   var versionText = "—"
 
@@ -20,6 +24,8 @@ final class DiagnosticsModel {
   @ObservationIgnored private var noteDeltaMin: Double?
   @ObservationIgnored private var noteDeltaMax: Double?
   @ObservationIgnored private var timerTask: Task<Void, Never>?
+  @ObservationIgnored private var lastLoadSampleAt: TimeInterval?
+  @ObservationIgnored private var lastLoadCPUSeconds: Double?
 
   /// 1秒ごとの計測と、60秒ごとのログを始める。
   func start() {
@@ -33,6 +39,7 @@ final class DiagnosticsModel {
         self.timeStats = self.stats.snapshot(now: ProcessInfo.processInfo.systemUptime)
         self.footprintMB = MemoryProbe.physFootprintMB()
         if tick % 60 == 0 { self.writePeriodicLog() }
+        if tick % 20 == 0 { self.writeLoadLog() }
       }
     }
   }
@@ -64,6 +71,30 @@ final class DiagnosticsModel {
     guard let delta else { return }
     noteDeltaMin = min(noteDeltaMin ?? delta, delta)
     noteDeltaMax = max(noteDeltaMax ?? delta, delta)
+  }
+
+  /// 場面（前面・PiP・背面）ごとの負荷を比べるための、20秒ごとのログ。
+  /// CPUは直近の20秒間の平均で、1コア分を100%とする（複数コアを使うと100%を超える）。
+  private func writeLoadLog() {
+    let now = ProcessInfo.processInfo.systemUptime
+    let cpu = CPUProbe.processCPUSeconds()
+    defer {
+      lastLoadSampleAt = now
+      lastLoadCPUSeconds = cpu
+    }
+    guard let lastAt = lastLoadSampleAt, let lastCPU = lastLoadCPUSeconds, now > lastAt else { return }
+    let percent = (cpu - lastCPU) / (now - lastAt) * 100
+    let scene = pipActive ? "PiP" : (scenePhaseName == "background" ? "背面" : (scenePhaseName == "active" ? "前面" : "inactive"))
+    let thermal: String
+    switch ProcessInfo.processInfo.thermalState {
+    case .nominal: thermal = "nominal"
+    case .fair: thermal = "fair"
+    case .serious: thermal = "serious"
+    case .critical: thermal = "critical"
+    @unknown default: thermal = "不明"
+    }
+    let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled ? " 低電力モード" : ""
+    AppLog.write(String(format: "負荷 CPU=%.0f%% 熱=%@%@ 場面=%@ %@", percent, thermal, lowPower, scene, playbackStateText()))
   }
 
   private func writePeriodicLog() {

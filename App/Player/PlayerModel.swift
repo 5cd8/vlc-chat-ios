@@ -30,6 +30,7 @@ final class PlayerModel {
   @ObservationIgnored private var clock = PlaybackClock()
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
+  @ObservationIgnored private var possibleTask: Task<Void, Never>?
   /// 中断・経路の消失の後は、音声出力が無音のまま残る（M1実機）。次に再生が始まるとき作り直す。
   @ObservationIgnored private var needsAudioRestart = false
   /// 中断の開始で、こちらが一時停止した。終了時に `shouldResume` なら再開する。
@@ -53,6 +54,9 @@ final class PlayerModel {
     }
     startObserving()
     observeProtectedData()
+    diagnostics.playbackStateText = { [weak self] in
+      self?.player.map { "状態=\($0.state)" } ?? "状態=-"
+    }
   }
 
   // MARK: - 開く
@@ -243,6 +247,19 @@ final class PlayerModel {
     diagnostics.pipActive = controller?.isActive ?? false
     guard let controller else { return }
     AppLog.write("PiPController 取得 isPossible=\(controller.isPossible)")
+    // 動画を開き直すまでPiPが使えなくなる現象の切り分け用。可否が変わった時刻を残す。
+    possibleTask?.cancel()
+    possibleTask = Task { [weak self, weak controller] in
+      var last = controller?.isPossible
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(500))
+        guard let self, let controller else { return }
+        if controller.isPossible != last {
+          last = controller.isPossible
+          AppLog.write("PiP可 変化 isPossible=\(controller.isPossible) \(self.stateDescription)")
+        }
+      }
+    }
     pipTask = Task { [weak self] in
       for await envelope in controller.pipEventEnvelopes {
         guard let self else { return }
@@ -266,6 +283,7 @@ final class PlayerModel {
   func sceneDidChange(isActive: Bool, name: String) {
     // ロック検知の通知はパスコード設定時にしか届かないので、前面復帰時の状態もここに残す。
     AppLog.write("画面 \(name) \(stateDescription) PiP可=\(pip?.isPossible ?? false)")
+    diagnostics.scenePhaseName = name
     // 前面に戻ったときは、再生中なら画面を消さない状態に戻す。
     UIApplication.shared.isIdleTimerDisabled = isActive && player?.state == .playing
   }
