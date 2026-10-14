@@ -363,7 +363,9 @@ final class M0Model {
   }
 
   private func stateDidChange(_ state: PlayerState) {
-    log.write("状態 \(state)")
+    // PiPの窓の再生/一時停止・スキップは、画面のボタンと違い「操作」の行を通らない。
+    // 状態の変化がアプリの操作かPiP側の操作かを、ログから切り分けられるようPiPの有無を添える。
+    log.write("状態 \(state) PiP=\(pip?.isActive == true ? "表示中" : "なし")")
     UIApplication.shared.isIdleTimerDisabled = (state == .playing)
     // 一時停止などをまたいだ空白が、再開直後の外れ値として記録されないようにする。
     if state != .playing { lastTimeReceivedAt = nil }
