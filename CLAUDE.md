@@ -13,4 +13,4 @@ iPhone向けのチャットリプレイ付き動画プレーヤー（vlc-with-ch
 ## 実機確認
 
 - 確認項目は、計画にまとめて回数を減らす。診断表示とログの共有（アプリ内）を手がかりにする。
-- 署名なしipaは、GitHub Actionsが作ってReleasesに載せ、SideStoreの「ファイルから取り込み」で入れる。SideStoreは無料のApple IDなので、署名は7日で切れ、同時に入れられるアプリは3つまで。
+- 署名なしipaは、GitHub Actionsが作ってReleasesに載せ、PCのiloader（v2.3.7）の「Import IPA」で入れる（SideStoreのAppleログインが障害中のため。直れば「ファイルから取り込み」でもよい）。無料のApple IDなので、署名は7日で切れ、同時に入れられるアプリは3つまで。

@@ -98,6 +98,9 @@ final class PlayerModel {
     try? player.setPlaybackRate(PlaybackRate(Float(PlaybackSpeed.normal)))
     clock.setRate(PlaybackSpeed.normal, at: now)
     diagnostics.resetTimeStats()
+    // 再生中に差し替えたとき、状態が `.playing` のまま変わらず通知が来ない場合に備える。
+    // 通知が来ても `clock.play(at:)` は冪等。
+    if player.state == .playing { clock.play(at: now) }
     // 古いファイルのスコープは、新しい再生を始めてから解放する。
     currentFile = file
     syncClockState()
