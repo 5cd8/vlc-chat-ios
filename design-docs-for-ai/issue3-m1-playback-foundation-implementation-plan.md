@@ -143,13 +143,13 @@ public struct PlaybackClock: Sendable {
   - `.stopped` では何もしない。
   - `.paused` では `anchorMedia = t`、`anchorUptime = at`（一時停止中に届く時刻通知は、権威のある値）。
   - `.playing` では、`current = position(at: at)` と比べる。`t < current` かつ `current - t <= backwardTolerance` なら、**基準を変えない**（表示が一瞬戻るのを防ぐ）。それ以外は `anchorMedia = t`、`anchorUptime = at`（実際の後方への移動・前方への遅れは、そのまま反映する）。
-- `play(at:)`：`mode = .playing`、`anchorUptime = at`（`anchorMedia` は保つ）。
-- `pause(at:)`：`anchorMedia = position(at: at)`、`mode = .paused`。
+- `play(at:)`：`mode == .playing` なら**何もしない**（`stateTransitions` は、同じ状態を2回通知し得る。基準を `at` に更新すると、補間の進みが消えて位置が戻る）。それ以外（`.paused`・`.stopped`）なら、`mode = .playing`、`anchorUptime = at`（`anchorMedia` は保つ）。
+- `pause(at:)`：`mode != .playing` なら**何もしない**。`.playing` なら、`anchorMedia = position(at: at)`、`mode = .paused`。
 - `stop()`：`mode = .stopped`、`anchorMedia = 0`、`pendingSeek = nil`。
 - `seek(to:at:)`：`anchorMedia = min(max(target, 0), duration ?? .infinity)`、`anchorUptime = at`、`pendingSeek = (anchorMedia, at)`。`mode` は変えない。
 - `setRate(r, at:)`：`anchorMedia = position(at: at)`、`anchorUptime = at`、`rate = r`。
 
-テスト（`PlaybackClockTests.swift`。手計算で検算した期待値で書く。`Swift Testing`）：
+テスト（`PlaybackClockTests.swift`。手計算で検算した期待値で書く。`Swift Testing`）。**特に断らない限り、各テストは `play(at: 0)` を呼んだ状態から始める**（`.stopped` では時刻通知を無視するため）：
 1. 初期状態：`mode == .stopped`、`position(at: 5) == 0`。
 2. 再生中の補間：`play(at: 0)` の後 `noteMediaTime(10, at: 0)`、`position(at: 0.5) == 10.5`（rate 1）。
 3. 倍速：`setRate(2, at: 0)` の後に `noteMediaTime(10, at: 0)`（`play(at: 0)` 済み）で、`position(at: 0.5) == 11.0`。
@@ -162,9 +162,11 @@ public struct PlaybackClock: Sendable {
 10. シーク直後の古い通知を捨てる：`play(at: 0)` 済みで `noteMediaTime(10, at: 0)`、`seek(to: 100, at: 1)`、`noteMediaTime(11, at: 1.1)`（|11−100|>1.0 かつ 経過0.1<2.0）は捨てて `position(at: 1.5) == 100.5`。
 11. シーク先に近い通知を受け入れる：上の続きで `noteMediaTime(100.2, at: 1.3)`（|100.2−100|=0.2 ≤ 1.0）を受け入れ、通常の規則（わずかな後退の無視）を通さず `position(at: 1.3) == 100.2`。
 12. シークのタイムアウト：`play(at: 0)` 済みで `seek(to: 100, at: 0)` の後、`noteMediaTime(50, at: 2.0)`（|50−100|>1.0 だが経過2.0 ≥ 2.0）を受け入れて `position(at: 2.0) == 50`。
-13. 長さでの上限：`setDuration(60)`、`noteMediaTime(59.9, at: 0)` の後 `position(at: 5) == 60`。
+13. 長さでの上限：`setDuration(60)`、`noteMediaTime(59.9, at: 0)` の後 `position(at: 5) == 60`（5 + 59.9 を長さ60で打ち切る）。
 14. 停止で0に戻る：`stop()` の後 `position(at: 5) == 0`、`mode == .stopped`。停止中の `noteMediaTime` は無視される。
-15. シークの目標のクランプ：`play(at: 0)` と `setDuration(60)` の後、`seek(to: 100, at: 0)` で `position(at: 0) == 60`、`seek(to: -5, at: 0)` で `0`（`.stopped` では位置が常に0なので、`play` を先に呼ぶ）。
+15. シークの目標のクランプ：`setDuration(60)` の後、`seek(to: 100, at: 0)` で `position(at: 0) == 60`、`seek(to: -5, at: 0)` で `0`（`.stopped` では位置が常に0なので、`play` を先に呼ぶ）。
+16. 再生中の `play(at:)` は位置を変えない：`noteMediaTime(10, at: 0)` の後 `play(at: 5)` で `position(at: 5) == 15`（基準を更新すると10に戻る）。
+17. 一時停止中の `pause(at:)`・停止中の `pause(at:)` は何もしない：`pause(at: 2)` の後に `pause(at: 100)` を呼んでも `position(at: 100) == 12`（`noteMediaTime(10, at: 0)` 済み）。`stop()` 後の `pause(at: 1)` で `mode == .stopped` のまま。
 
 ### 5.2 `PlaybackSpeed`
 
