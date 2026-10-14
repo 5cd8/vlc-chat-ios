@@ -6,4 +6,14 @@
 - 用語：[CONTEXT.md](CONTEXT.md)
 - ブラウザ版（凍結）：[vlc-chat-pwa](https://github.com/5cd8/vlc-chat-pwa)
 
-状態：要件の整理が終わり、実現性の確認（M0）の前。
+状態：実現性の確認（M0）の実装が済み、iPhone実機での確認待ち。
+
+## ビルド
+
+Macが無い環境で開発しているため、ビルドはGitHub Actions（`.github/workflows/build-ipa.yml`、`macos-26`）で行う。
+
+- `project.yml`（XcodeGen）から `VLCWithChat.xcodeproj` を生成する。`.xcodeproj` はコミットしない。
+- `scripts/make-ipa.sh` が署名なしipa（`vlc-with-chat-unsigned.ipa`）と、`ldid -S` で偽署名をかけた同じビルド（`vlc-with-chat-fakesigned.ipa`）を作る。実機へは、SideStoreが署名してインストールする。
+- タグ `m0-<n>` をpushすると、2つのipaとLGPL-2.1の全文をReleaseに載せる。
+- ロジックは `Packages/VLCChatCore` に分け、`swift test --package-path Packages/VLCChatCore` でテストする。このPackageは `SwiftVLC` に依存させない（libVLCのコピーがプロセス内に2つできると未定義動作になるため）。
+

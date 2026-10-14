@@ -1,0 +1,52 @@
+name: VLCWithChat
+
+options:
+  bundleIdPrefix: com.5cd8
+  deploymentTarget:
+    iOS: "18.0"
+
+packages:
+  SwiftVLC:
+    url: https://github.com/harflabs/SwiftVLC
+    exactVersion: 1.1.0-beta.14
+  VLCChatCore:
+    path: Packages/VLCChatCore
+
+targets:
+  VLCWithChat:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+    dependencies:
+      - package: SwiftVLC
+      - package: VLCChatCore
+    scheme: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.5cd8.vlcchatios
+        PRODUCT_NAME: VLCWithChat
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.0"
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: vlc-with-chat
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UIBackgroundModes:
+          - audio
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        ITSAppUsesNonExemptEncryption: false

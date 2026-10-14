@@ -1,2 +1,7 @@
 docs/adr/
 docs/issue-draft.md
+user-prompt/
+VLCWithChat.xcodeproj/
+App/Info.plist
+build/
+.build/
