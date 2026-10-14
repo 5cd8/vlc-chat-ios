@@ -111,7 +111,7 @@ struct M0View: View {
           line("activeVideoOutputs", "\(player.activeVideoOutputs)")
           line("トラック", model.trackSummary)
         }
-        line("timeChanged間隔", timeStatsText)
+        line("timeChanged間隔", model.timeStats?.summaryText ?? "—")
         line("phys_footprint", model.footprintMB.map { String(format: "%.1f MB", $0) } ?? "—")
         line("PiP", "isPossible=\(model.pip?.isPossible ?? false) isActive=\(model.pip?.isActive ?? false)")
         line("PiP開始結果", model.pipStartResult)
@@ -128,14 +128,6 @@ struct M0View: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(8)
     }
-  }
-
-  private var timeStatsText: String {
-    guard let stats = model.timeStats else { return "—" }
-    func ms(_ stat: IntervalStats.Stat) -> String {
-      String(format: "%.0f/%.0f/%.0f ms", stat.min * 1000, stat.avg * 1000, stat.max * 1000)
-    }
-    return "受信(min/avg/max) \(ms(stats.wall)) メディア \(ms(stats.media)) n=\(stats.samples)"
   }
 
   private func line(_ title: String, _ value: String) -> some View {

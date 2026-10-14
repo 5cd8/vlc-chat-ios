@@ -348,8 +348,14 @@ final class M0Model {
         tick += 1
         self.timeStats = self.stats.snapshot(now: ProcessInfo.processInfo.systemUptime)
         self.footprintMB = DiagnosticsLog.physFootprintMB()
-        if tick % 60 == 0, let mb = self.footprintMB {
-          self.log.write(String(format: "phys_footprint %.1fMB", mb))
+        if tick % 60 == 0 {
+          if let mb = self.footprintMB {
+            self.log.write(String(format: "phys_footprint %.1fMB", mb))
+          }
+          // 画面を見られない長時間の再生でも、C（timeChanged間隔）の数値が残るようにする。
+          if let snapshot = self.timeStats {
+            self.log.write("timeChanged間隔 \(snapshot.summaryText)")
+          }
         }
       }
     }
@@ -397,5 +403,15 @@ final class M0Model {
 
   private static func seconds(_ duration: Duration) -> Double {
     Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+  }
+}
+
+extension IntervalStats.Snapshot {
+  /// 受信時刻の差とメディア時刻の差の min/avg/max（ミリ秒）と、窓内の記録件数。
+  var summaryText: String {
+    func ms(_ stat: IntervalStats.Stat) -> String {
+      String(format: "%.0f/%.0f/%.0f ms", stat.min * 1000, stat.avg * 1000, stat.max * 1000)
+    }
+    return "受信(min/avg/max) \(ms(wall)) メディア \(ms(media)) n=\(samples)"
   }
 }
