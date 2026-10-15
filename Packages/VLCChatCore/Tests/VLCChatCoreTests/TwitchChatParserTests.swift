@@ -46,8 +46,11 @@ struct TwitchChatParserTests {
     #expect(role("subscriber") == .normal)
     #expect(role("vip") == .normal)
     #expect(role("Moderator") == .normal)
-    let both = twitchComment(badges: #"[{"_id":"moderator"},{"_id":"broadcaster"}]"#)
-    #expect(TwitchChatParser.parse(comment: both)?.role == .owner)
+    // バッジの並びの順によらず、オーナーが優先される。
+    let ownerLast = twitchComment(badges: #"[{"_id":"moderator"},{"_id":"broadcaster"}]"#)
+    let ownerFirst = twitchComment(badges: #"[{"_id":"broadcaster"},{"_id":"moderator"}]"#)
+    #expect(TwitchChatParser.parse(comment: ownerLast)?.role == .owner)
+    #expect(TwitchChatParser.parse(comment: ownerFirst)?.role == .owner)
   }
 
   @Test("エモートは画像のURLと、名前の代替テキストにする") func parsesEmoticonFragments() {

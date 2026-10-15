@@ -1,6 +1,7 @@
 /// チャンクに分かれたバイト列を、1行ずつに切り出す（YouTubeのJSON Lines用）。
 ///
-/// 区切りは `\n` だけ（末尾の `\r` は除く）。空行と空白だけの行は渡さない（PC版の `IsNullOrWhiteSpace` と同じ）。
+/// 区切りは `\n` だけ（末尾の `\r` は除く）。PC版の `ReadLine` は単独の `\r` でも区切るが、
+/// yt-dlpの出力は `\n` なので揃えていない。空行と空白だけの行は渡さない（PC版の `IsNullOrWhiteSpace` と同じ）。
 /// 先頭のUTF-8のBOMは読み飛ばす（PC版は `StreamReader` が除く）。
 public struct LineSplitter {
   private var buffer: [UInt8] = []

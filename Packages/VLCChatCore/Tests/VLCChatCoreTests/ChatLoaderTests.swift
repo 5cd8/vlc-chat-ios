@@ -83,7 +83,7 @@ struct ChatLoaderTests {
     #expect(throws: ChatLoaderError.cancelled) { try load(file, chunkSize: 10, isCancelled: { true }) }
   }
 
-  @Test("commentsを含まない入力でも、チャンクごとにキャンセルが効く") func cancelsEvenWithoutComments() {
+  @Test("先読みのループでも、commentsを含まない入力のキャンセルが効く") func cancelsDuringPrefetchWithoutComments() {
     var calls = 0
     let file = Array(#"{"video":{"title":"x"},"other":[1,2,3,4,5,6,7,8,9]}"#.utf8)
     #expect(throws: ChatLoaderError.cancelled) {

@@ -164,6 +164,12 @@ struct JSONObjectSplitterTests {
     }
   }
 
+  @Test("配列の要素の間に閉じ括弧が来たら、そこまでの要素を有効として終わる") func stopsOnBrokenArrayKeepingElements() {
+    let result = splitObjects(#"{"comments":[{"a":1}}"#, size: 3)
+    #expect(result.elements == [#"{"a":1}"#])
+    #expect(result.outcome == .arrayFound)
+  }
+
   @Test("配列に入れない入力の結果") func reportsWhyArrayWasNotFound() {
     #expect(splitObjects("[1]", size: 1000).outcome == .rootNotObject)
     #expect(splitObjects(#"{"x":1}"#, size: 1000).outcome == .commentsMissing)
