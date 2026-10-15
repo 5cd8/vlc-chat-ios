@@ -55,7 +55,7 @@ Issue #10 の「範囲」（親Issue #1 の機能要件 2（前へ・次へ）�
 | U1 | ファイルピッカーで選んだURLから作ったブックマークが、アプリを終了して起動し直した後（できれば再インストール後）も解決でき、`startAccessingSecurityScopedResource()` で開けるか。対象：アプリ内 `Documents`（ファイル共有で入れたもの）・iCloud Drive・外部ストレージ | チェックC | iOSでは `bookmarkData` に `.withSecurityScope` が無い。`.minimalBookmark` を試す。それでも解決できない場所があれば、その場所の項目は無効扱いになる。ユーザーに報告して相談 |
 | U2 | 再生が始まってから（`.playing`、長さ確定、`seekableChanged` が真）の絶対位置へのシークで、復元できるか。再生が始まってから跳ぶので、最初の一瞬だけ0秒付近が表示されないか（表示・チャット・ロック画面） | チェックG | 6.2節のとおり、`timeChanged` で最大5秒まで再試行する。それでも駄目な形式は、復元できない形式として報告 |
 | U3 | `endReached` が、MP4・MOV・WebM・MKVの実ファイルで、最後まで再生したときに出るか（出ないと、自動進行と「最後まで再生した動画の記憶を消す」が動かない） | チェックE・G（短い動画を最後まで再生する） | `stopped` への遷移＋「位置が長さの近く」で代替判定する案を報告して相談 |
-| U4 | ロック画面・コントロールセンター・PiPの窓の「前へ」「次へ」（`previousTrackCommand`／`nextTrackCommand`）が表示され、押せるか。再生速度・シークの表示、10秒送り・戻し（`skipForward`／`skipBackward`）と両立するか | チェックE | iOSは `skipForward`／`skipBackward` が有効だと、前へ・次への枠にスキップを出すことが多い。両立しなければ、ユーザーにどちらを優先するか選んでもらう（要件の判断） |
+| U4 | ロック画面・コントロールセンター・PiPの窓の「前へ」「次へ」（`previousTrackCommand`／`nextTrackCommand`）が表示され、押せるか。再生速度・シークの表示、10秒送り・戻し（`skipForward`／`skipBackward`）と両立するか | チェックE | iOSは `skipForward`／`skipBackward` が有効だと、前へ・次への枠にスキップを出すことが多い。**両立しなければ10秒送り・戻しを優先する（ユーザー確定）。報告だけ** |
 | U5 | シート内で `.fileImporter` が開けるか（プレイリストの「追加」・項目のチャット割り当て・設定の絵文字入れ替え）。SwiftUIでは、1つのビューに複数の `.fileImporter` を付けると、最後のものしか効かない既知の落とし穴がある | チェックD・H | 1つの ピッカーの置き場所を変える（6.4節の規則が前提。シート内で出ない場合は、シートを閉じてから `PlayerScreen` のピッカーを開く） |
 | U6 | `List` の編集モード（並べ替え）・左スワイプ削除・行内のボタン（チャット割り当て）が、シートの中で期待どおりに動くか。行内のボタンと行全体のタップの競合 | チェックD | ボタンのスタイルを `.borderless` にする（6.4節に最初から採用）。それでも競合すれば、行の末尾のメニュー（`Menu`）に替える |
 | U7 | 自然順（`.numeric`＋`.caseInsensitive`）が、日本語を含む名前で期待どおりに並ぶか | チェックA | 比較を `localizedStandardCompare` に替える（ロケール依存になるので、まず報告） |
@@ -389,7 +389,7 @@ public struct SettingsStore {
 - `install(handlers:)` に `add(commands.nextTrackCommand, name: "nextTrack") { _ in handlers.next }`、`previousTrackCommand` も同様に足す。現在 `isEnabled = false` にしている2行（98〜99行）は消す。
 - `update(_ state: NowPlayingState?, canGoPrevious: Bool = false, canGoNext: Bool = false)`（既定値で既存の `update(nil)` を通す）：`state == nil` のときは、2つとも無効。そうでなければ `previousTrackCommand.isEnabled = canGoPrevious`、`nextTrackCommand.isEnabled = canGoNext`。`setPlaybackCommands(enabled:)` の既存の一覧には含めない。
 - `NowPlayingState`（Core）は変えない。
-- ロック画面で前へ・次へと10秒送り・戻しが両立しない場合（U4）：計画は両方を有効にして出す。実機で外れたら、ユーザーに優先を選んでもらう。
+- **ロック画面で前へ・次へと10秒送り・戻しが両立しない場合（U4）：ユーザーが確定（2026-10-16）。10秒送り・戻しを優先する**。`previousTrackCommand`／`nextTrackCommand` は有効にして登録するが、両立せずロック画面・コントロールセンターに出ないなら、それを受け入れる（`skipForward`／`skipBackward` は無効にしない。画面のボタンとPiPの窓は前へ・次へが使える）。実機で出るかを報告するだけでよい。
 
 ### 6.4 `AppModel` の変更（選択の振り分け・項目の再生・自動進行）
 
@@ -438,7 +438,7 @@ public struct SettingsStore {
 ### 6.5 画面
 
 **`PlayerScreen`**：
-- 動画を開いていない（`title == nil`）とき、動画領域に「ファイルを選択」を出す（M2のとおり）。**プレイリストが空でなければ**、その横に「プレイリスト」ボタンも出す（確定事項9）。右上に設定（歯車）の小さいボタンも出す（**Issue の「画面の入口」は、空のとき「ファイルを選択」だけとしているが、それでは設定シートに入れず、絵文字の入れ替え・ライセンスが見えなくなるため、歯車は常に出す。この差はユーザーに報告して確認する**。実装は `playlist.playlist.entries.isEmpty` の1条件で切り替えられる）。
+- 動画を開いていない（`title == nil`）とき、動画領域に「ファイルを選択」を出す（M2のとおり）。**プレイリストが空でなければ**、その横に「プレイリスト」ボタンも出す（確定事項9）。右上に設定（歯車）の小さいボタンも出す（歯車は常に出す。ユーザー確定で、Issue #10 の「画面の入口」も更新済み）。
 - `@State var showsPlaylist`、`showsSettings`。`.sheet` を2つ付ける（`PlaylistView`・`SettingsView`。`presentationDetents([.medium, .large])`）。
 
 **`ControlsView`**：`ControlsView(model:playlist:onPickFile:onShowPlaylist:onShowSettings:onPrevious:onNext:)`。
