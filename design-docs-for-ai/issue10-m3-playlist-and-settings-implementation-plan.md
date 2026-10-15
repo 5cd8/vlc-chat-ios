@@ -56,7 +56,7 @@ Issue #10 の「範囲」（親Issue #1 の機能要件 2（前へ・次へ）�
 | U2 | 再生位置の復元のシークを、`lengthChanged` の直後に行って成功するか。失敗する動画（4K AV1など）では、再生が始まってから行う | チェックG | 6.2節のとおり、`lengthChanged` で試し、受け付けられなければ最初の `.playing` で1回試す。それでも駄目なら位置の復元ができない形式として報告 |
 | U3 | `endReached` が、MP4・MOV・WebM・MKVの実ファイルで、最後まで再生したときに出るか（出ないと、自動進行と「最後まで再生した動画の記憶を消す」が動かない） | チェックE・G（短い動画を最後まで再生する） | `stopped` への遷移＋「位置が長さの近く」で代替判定する案を報告して相談 |
 | U4 | ロック画面・コントロールセンターの「前へ」「次へ」（`previousTrackCommand`／`nextTrackCommand`）が表示され、押せるか。再生速度・シークの表示と両立するか | チェックE | `skipForward`／`skipBackward` と同時には出ない端末がある。出ない場合は報告して相談 |
-| U5 | シート内で `.fileImporter` が開けるか（プレイリストの「追加」・項目のチャット割り当て・設定の絵文字入れ替え）。SwiftUIでは、1つのビューに複数の `.fileImporter` を付けると、最後のものしか効かない既知の落とし穴がある | チェックD・H | 1つの `.fileImporter` を、用途を示す状態（`ImportPurpose`）で共有する（6.4節に最初から採用） |
+| U5 | シート内で `.fileImporter` が開けるか（プレイリストの「追加」・項目のチャット割り当て・設定の絵文字入れ替え）。SwiftUIでは、1つのビューに複数の `.fileImporter` を付けると、最後のものしか効かない既知の落とし穴がある | チェックD・H | 1つの ピッカーの置き場所を変える（6.4節の規則が前提。シート内で出ない場合は、シートを閉じてから `PlayerScreen` のピッカーを開く） |
 | U6 | `List` の編集モード（並べ替え）・左スワイプ削除・行内のボタン（チャット割り当て）が、シートの中で期待どおりに動くか。行内のボタンと行全体のタップの競合 | チェックD | ボタンのスタイルを `.borderless` にする（6.4節に最初から採用）。それでも競合すれば、行の末尾のメニュー（`Menu`）に替える |
 | U7 | 自然順（`.numeric`＋`.caseInsensitive`）が、日本語を含む名前で期待どおりに並ぶか | チェックA | 比較を `localizedStandardCompare` に替える（ロケール依存になるので、まず報告） |
 | U8 | iCloud Drive上で、まだ端末にダウンロードされていないファイルを項目にしたとき、解決できるが開けない（読めない）。無効扱いと区別できるか | チェックF | 無効扱いのままにする（区別しない）。ユーザーに報告 |
@@ -331,7 +331,12 @@ public struct SettingsStore {
 
 `AppModel` に `let playlist: PlaylistModel`、`let resume: ResumeModel`、`let settings: SettingsModel` を足す。起動時の生成順は、既存の順（診断→音声セッション→再生→ロック画面）に、`playlist`・`resume`・`settings` を足し、`playback.resumeLookup`・`playback.positionRecorder`・`playback.onEnded`・`playback.navigationState`、`remote` の `next`/`previous` を配線する。**起動しても再生は始めない**（確定事項9）。
 
-**ファイルピッカーの用途（U5）**：`PlayerScreen` の `.fileImporter` は1つだけにし、用途を示す `enum ImportPurpose { case open, append, assignChat(UUID), replaceEmojiLibrary }` を `@State` で持つ。許可する種類は用途ごとに変える（`open`：`[.item]` 複数／`append`：`[.item]` 複数／`assignChat`：`[.json]` 1つ／`replaceEmojiLibrary`：`[.item]` 1つ）。結果は `AppModel` の用途ごとのメソッドに渡す。シートの中のボタンは、`@Binding` か `AppModel` 経由で `PlayerScreen` の用途を設定して、`PlayerScreen` 側のピッカーを開く（ピッカーをシートの中に置かない）。
+**ファイルピッカーとアラートの置き場所（U5・レビュー指摘S1・S2）**：SwiftUIは、シートを表示している間、その下のビューからは別の画面（ピッカー・アラート）を重ねて出せない。そこで**表示を行うビューごとに、`.fileImporter` を1つ、`.alert`（`app.alertMessage`）を1つずつ付ける**。
+- `PlayerScreen`：`.fileImporter`（用途 `open`：`[.item]` 複数）と `.alert`（M2のまま）。
+- `PlaylistView`：`.fileImporter` を1つ。用途は `@State enum ImportPurpose { case append, assignChat(UUID) }`（`append`：`[.item]` 複数／`assignChat`：`[.json]` 1つ）で切り替える（同じビューに複数付けると最後のものしか効かない落とし穴を避けるため、ビューごとに1つ）。`.alert` も付ける。
+- `SettingsView`：`.fileImporter` を1つ（`[.item]` 1つ。絵文字ライブラリの入れ替え）。`.alert` も付ける。
+- アラートの二重表示を避ける規則：3つの `.alert` は同じ `app.alertMessage` を見るので、**シートが表示されている間は、シート側だけが `isPresented` を真にし、`PlayerScreen` 側は偽にする**（`showsPlaylist || showsSettings` のとき `PlayerScreen` の `.alert` を出さない）。閉じる処理（Binding の `set`）は、M2と同じく各 `.alert` の1箇所だけで `dismissAlert()` を呼ぶ。
+- 結果は `AppModel` の用途ごとのメソッド（`handlePicked`／`appendPicked`／`assignChatPicked`／`replaceEmojiPicked`）に渡す。
 
 **`handlePicked(urls:)`（`open` の用途）** — M2の関数を次のように置き換える：
 1. 各URLを `PickedFileKind.classify(pathExtension:)`（`url.pathExtension` を渡す。M2の`handlePicked`と同じ）で分類。未対応があれば通知「対応していない形式です」（M2のとおり）。`.sqlite` は、M2のとおり最初の1つを `emoji.importLibrary(from:)`（失敗は通知）。
@@ -393,6 +398,28 @@ public struct SettingsStore {
 
 `DiagnosticsView` の詳細シートに「プレイリスト：○件 現在 ○番目」「再生位置の記憶：○件」の行を足す。追加するログは6.1〜6.4のとおり。語彙は `プレイリスト…`・`記憶…`・`再生 …` で始める。
 
+### 6.7 補足（独立レビュー1の反映。6.1〜6.5と食い違う場合は**本節が優先**）
+
+1. **`AppModel.init` での配線（R1）**：`RemoteControlController` は `AppModel` の全プロパティを初期化する前に作られるので、`next`／`previous` で `[weak self]` の `self` を捕まえられない。`AppModel` を後から結びつける中継（`final class NavigationRelay { weak var model: AppModel? }` を先に作ってハンドラに渡し、`init` の最後で `relay.model = self`）にする。
+2. **終端の記録（R2）**：`handle(.endReached)` では、`onEnded` を呼ぶ**前に** `currentIdentity = nil` にする（`endReached` と `stopped` は別の Task で届き順が決まらず、`playItem` の `recordPosition()` が終端付近の位置を書き戻すため）。
+3. **復元の状態（R3）**：`currentIdentity`・`pendingResume`・`resumeTarget` は、`player.play(url:)` が成功した後（`title` を設定する所）で設定する（失敗時に再生中の古い動画の識別情報を上書きしない）。`pendingResume` は、`lengthChanged` で `ResumeRules.startPosition` を評価したら**位置の有無にかかわらず**nilにする（nilなら復元せず記録を始める）。`resumeTarget` は、シートが成功するか最初の `.playing` で1回試した後にnilにする。
+4. **記録の判定をCoreへ（R5）**：`ResumeRules.shouldRecord(position:isClockStopped:isResumePending:)` に変え、「1秒以上」「時計が停止中でない」「復元待ちでない」の3条件をCoreに置いて単体テストする（各条件を1つずつ崩したケースを書く）。
+5. **起動直後の「現在の項目」（R4）**：起動時に復元した `currentID` は、再生中ではない。「再生中の項目」の判定は `playback.title != nil` とし、(a)チャットだけを選んだとき、`title == nil` なら「先に動画を開いてください」（`playlist.current` があっても割り当てない）、(b)現在の項目を削除したときの「次を再生」は `title != nil` のときだけ（`title == nil` なら現在だけ付け替えて再生しない）。
+6. **有効な項目が無いとき（R9）**：Issue（確定事項2）のとおり、自動進行・次へ・前へのいずれも、有効な項目が無ければ**停止する**（`playback.stop()` ＋ チャットのリセット。通知「再生できる項目がありません」）。6.4の `nextItem()`／`previousItem()` の「今の再生を続ける」は取り消す。ただし `skipped` も `target` も無い（先頭での前へ、末尾での次へ）ときは何もしない。
+7. **保存先（R7）**：`playlist.json`・`resume.json` は、`FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)`（`EmojiLibrary.swift` と同じ。`create: true` でフォルダを作る）の下に置く。
+8. **インターフェース（R10）**：
+   - `PlaylistModel.replace(videos: [URL], chats: [URL?]) -> ReplaceResult`、`append(同)`。`ReplaceResult { var failedNames: [String] }`（ブックマークを作れず項目にしなかった動画名。`AppModel` が通知にする）。
+   - `RemoteControlController.update(_ state: NowPlayingState?, canGoPrevious: Bool = false, canGoNext: Bool = false)`（既定値を付けて、既存の `update(nil)` を通す）。
+   - `ControlsView(model:playlist:onPickFile:onShowPlaylist:onShowSettings:onPrevious:onNext:)`。`playlist.hasPrevious`／`hasNext` は `playlist: PlaylistModel` から読む。
+   - `PlayerModel.stop()` は `player.stop()`、`recordPosition()`（停止の前に）、時計の停止、`duration`・`title`・`currentFile`・`currentIdentity` のnil、`remote?.update(nil)` まで。`chat.reset()` は `PlayerModel` が `chat` を持たないので、`AppModel` 側で呼ぶ。
+   - `refreshRemote()` は、追記・削除・並べ替え・現在の項目の変更の後に `AppModel` が呼ぶ。
+9. **`playItem` の手順（6.4の3の読みにくさ）**：①`playback.open(url:)` ②`openCount` が増えたら成功。失敗なら現在の項目は変えずに終了 ③`playlist.setCurrent(id:)` ④`chat.reset()` ⑤チャット読み込み。
+10. **削除（複数件）**：`onDelete` の `IndexSet` は添字の大きい方から1つずつ `remove(at:)` する。現在の項目を消して次の項目が無効で `nextStep` もnilなら、停止する。
+11. **`validity` の更新**：飛ばした項目の `validity` を `false` に更新する（シートの警告が古いまま残らないように）。
+12. **その他**：`PlaylistEntry.videoSize` は使い道が無いので**持たない**。`ResumeStore` に `public init()` を付ける。`ResumeStore` の往復テストの `Date` は `Date(timeIntervalSinceReferenceDate: 1000)` の固定値にする。`chatBaseName` は `chatSuffixes` の順に調べ、最初に一致したものを除く（比較は `lowercased()`）。5.4のテストは、各ケースを `a〜e`・現在 `c` から始める。**NFC正規化**：Swiftの `String` の `==`・`hash` は正準等価で比べるので、正規化しなくても等しい。正規化は「保存するファイル名を一定の形にそろえる」ためだけに行い、テストは `fileName.unicodeScalars` がNFCの並びになっていることを確かめる（5.2テスト8・5.3・5.6テスト6の「等しい」は補助）。`VideoIdentity` の `Decodable` は自動生成で `init` の正規化を通らないので、`init(from:)` を手で書いて通す。`licenses/SwiftVLC-MIT.txt` は SwiftVLC の v1.1.0-beta.14 タグの `LICENSE`（`https://raw.githubusercontent.com/harflabs/SwiftVLC/1.1.0-beta.14/LICENSE`。タグ名・URLは実在を確かめてから写す）。
+13. **追加の実機観点**：チェックCに「数GB〜30GB台の動画を、コピーせず再起動後に開き直せるか」を入れる。U2に「`lengthChanged` の時点で時計は停止中のため、最初に0秒が一瞬表示されてから跳ぶ可能性」を入れる。U4に「PiPの窓の前へ・次への扱い」を入れる。
+14. **ロック画面の前へ・次へと10秒送り・戻しが両立しない場合（R8）**：実機で両立しなければ、ユーザーに選んでもらう（要件の判断）。計画は両方を有効にして出す。
+
 ## 7. 設計判断の記録（採用案・理由・採らなかった案）
 
 | # | 判断 | 理由 | 採らなかった案 |
@@ -403,7 +430,7 @@ public struct SettingsStore {
 | D4 | 復元は「読み込んでから絶対位置へシーク」。`:start-time` は使わない | `:start-time` はタイムラインを切り詰める（SwiftVLCのドキュメント）。表示の位置・長さ・シークバーが全部ずれる | `:start-time` オプション。実装は簡単だが、M1の時計・ロック画面の表示と整合しない |
 | D5 | 復元が済むまで位置を記録しない | 動画を開いた直後の0秒付近で、保存済みの位置を上書きしてしまうため | 常に記録。復元前の0を保存してしまう |
 | D6 | 終了の検出は `PlayerEvent.endReached` | 正常な終端のときだけ出る（明示的な停止・差し替えでは出ない）。自動進行と「最後まで再生した動画の記憶を消す」を、誤って発火させない | `stopped` への遷移だけで判定。ユーザーの停止や差し替えでも発火する |
-| D7 | ファイルピッカーを1つにして、用途で切り替える（U5） | SwiftUIは、1つのビューに複数の `.fileImporter` を付けると最後のものしか効かない。シートの中にも置かない | 用途ごとに `.fileImporter` を付ける |
+| D7 | ファイルピッカーとアラートを、表示を行うビュー（`PlayerScreen`・`PlaylistView`・`SettingsView`）ごとに1つずつ付け、ビュー内の用途は enum で切り替える（U5） | SwiftUIは、1つのビューに複数の `.fileImporter` を付けると最後のものしか効かない。また、シートの表示中は下のビューからピッカー・アラートを出せない | `PlayerScreen` だけに1つ置く（シート表示中に出ない見込み） |
 | D8 | 有効性の確認は同期（ブックマークの解決＋読み取り可否） | 数十項目で軽い。自動進行の飛ばす判定からそのまま呼べる。非同期にすると、判定の結果を待つ状態遷移が増える | 先に全項目の有効性を非同期に求めて保持。自動進行の時点で古くなる |
 | D9 | 「前へ」「次へ」のボタンの有効・無効は、添字（先頭・末尾）で決める。無効な項目だけが残っているときは、押したときに通知 | 全項目の有効性を毎回調べるとシートを開かなくても重くなる。確定事項3は「先頭では何もしない（ボタンを無効表示）」 | 有効な項目の有無でボタンを無効表示。判定の費用と、画面の更新の頻度が増える |
 | D10 | 動画を開けたら `setCurrent`（開く前ではなく後） | 開けなかったときに、現在の項目と再生が変わらないようにする（M1・M2の失敗時の扱いと揃える） | 先に `setCurrent`。失敗時に現在の項目だけが進んでしまう |
