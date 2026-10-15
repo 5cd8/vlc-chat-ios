@@ -441,6 +441,27 @@ public struct SettingsStore {
    - `Playlist.setCurrent(id:)` は、存在しない `id` なら**無視する**（現在を変えない）。テストを足す。`ResumeStore.Entry.updatedAt` は、将来の整理用にだけ持つ（使わないなら削除してよい。実装者の判断）。
    - プレイリストの現在の項目の「再生中のアイコン」は、`playback.title != nil` のときだけ出す（起動直後は、ハイライトだけ）。
 
+### 6.9 補足3（独立レビュー3の反映。**優先順位は 6.9 > 6.8 > 6.7 > 6.1〜6.6・5節**）
+
+本文（5節・6.1〜6.6）には、6.7〜6.9で上書きした古い記述が残っている（`videoSize`、`shouldRecord(position:)` の1引数版、5.6のテスト4・5、「今の再生を続ける」、`currentIdentity = nil`、`lengthChanged` で1回＋次の `.playing` で1回の復元）。**実装者は、実装前に6.7〜6.9の項目を本文の該当箇所へ反映（本文を書き換える）してから進める**。反映が済んだら6.7〜6.9は消してよい。
+
+1. **「停止」の定義（レビュー3 S1）**：`PlayerModel` に2つの操作を持つ。
+   - `stopKeepingTitle()`：再生中でも停止中でも、`player.stop()` を呼び、時計を停止して位置を0に戻す。`title`・`duration`・`currentFile`・`currentIdentity` は残す（M1の「終端で停止して先頭に戻る」状態と同じ）。呼ぶ前に `recordPosition()`。
+   - `stop()`（6.7-8）：動画を閉じる（`title == nil` になる）。
+   - 使い分け：(a)自動進行オフ・末尾で終了 → 何もしない（すでにM1の終端状態）。(b)自動進行・次へ・前へで有効な項目が無い → 再生中でも停止中でも `stopKeepingTitle()`、通知「再生できる項目がありません」。(c)現在の項目を削除して次が無い／全部無効 → `stop()`。
+2. **置き換え（R2）**：`playItem(at:byUser:) -> Bool`（成功＝`openCount` が増えた）にする。置き換えは、①`PlaylistModel` が `replace` 前のスナップショットを持ち、新しい項目で `replace` ②先頭から順に `isVideoPlayable` を確かめ、最初に有効な項目を `playItem(byUser: false)`。**`openError` のアラートが出るので、`byUser: false` では「開けませんでした」の自前通知は出さない**。失敗（`false`）したら次の有効な項目へ（開けなかった項目は `validity` を更新して通知にまとめる）③全部失敗したらスナップショットへ戻して保存し、通知「再生できる項目がありません」。④1つでも成功したら確定。
+3. **復元のシーク（R4）**：`startObserving()` の絞り込みに `.seekableChanged` を足す。「長さが分かった（`lengthChanged` で `duration` を設定済み）」と「`player.isSeekable`」が**両方そろった最初のとき**（どちらのイベントでも判定する）に1回だけ `seek(toSeconds:)` を試し、`@discardableResult` の戻りが `false`（受け付けられなかった）なら、次の `timeChanged`（`.playing` 中）で1回だけ再試行する。`seek` の `true` は「受け付けられた」であって「着地した」ではない（コメントに書く）。解除の上限5秒（6.8-1）は変えない。
+4. **`isResumePending` をCoreへ**：`ResumeRules.isResumePending(secondsSincePlaying: TimeInterval?, restoreCompleted: Bool) -> Bool`（`restoreCompleted` が偽かつ `secondsSincePlaying` が nil または 5秒未満なら真）。テスト：nil→真、4.99→真、5.0→偽、`restoreCompleted == true` なら常に偽。
+5. **終端の順序**：`open` は、`recordPosition()` を呼んでから `hasReachedEnd` を下ろす（逆にすると終端付近の位置が書き戻される）。
+6. **`SelectionPlanner`（6.8-6）の追補**：`soleChatIndex` は**自然順で先頭**。チャットだけを複数選んだときの残りは `ignoredChats` に入れて通知する。「追加」でも同じ `SelectionPlanner` を使い、`sqlite`／未対応は無視して通知（`.sqlite` は「追加」では取り込まず、通知「絵文字ライブラリは設定から入れ替えてください」）。ファイル構成（4節）に `SelectionPlanner.swift`・`SelectionPlannerTests.swift` を足す。
+7. **ブックマークの部分失敗**：チャットのブックマークだけ作れなかったときは、動画だけを項目にし、通知「チャットを開けませんでした: 名前」。動画が作れなければ項目にせず `failedNames` に入れる。
+8. **複数件の削除**：すべて消し終えてから、現在が消えたかを1回だけ判断する。
+9. **ファイル名**：一覧の表示名は保存した `videoFileName`、記憶の識別とタイトルは開いたURLの `lastPathComponent`（ブックマークはリネームを追うので、ずれ得る）。開いた後の識別が正。
+10. **`SettingsModel`**：`@Observable @MainActor`、`var autoAdvance: Bool`（`init` で `SettingsStore` から1回読み、`didSet` で書く）。
+11. **型名**：`VideoChatPairing.Result` は `Swift.Result` を隠すので、`PairingResult` にする。
+12. **テストの追加**：`VideoChatPairing`：動画 `[A.mp4, B.mp4]`・チャット `[B.json, A.json]` → `[1, 0]`（接尾辞なしの一致）。動画 `[X_chat.mp4, Y.mp4]`・チャット `[X_chat.json, Y_chat.json]` → `[0, 1]`（チャットの拡張子だけを除いた名前の一致）。`Playlist`：`move(fromOffsets: [2], toOffset: 0)`（`[a,b,c,d,e]`・現在c）→ `[c,a,b,d,e]`・現在の添字0。現在が nil のときの `remove(at:)` は `.notCurrent`。
+13. **ユーザーに確認する事項（実装前）**：(a)歯車を空のプレイリストでも常に出す（Issueと異なる。6.8-5）、(b)ロック画面で前へ・次へと10秒送り・戻しが両立しないときの優先（実機で外れたとき）。
+
 ## 7. 設計判断の記録（採用案・理由・採らなかった案）
 
 | # | 判断 | 理由 | 採らなかった案 |
