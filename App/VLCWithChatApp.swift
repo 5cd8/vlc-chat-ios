@@ -2,11 +2,11 @@ import SwiftUI
 
 @main
 struct VLCWithChatApp: App {
-  @State private var model = M0Model()
+  @State private var app = AppModel()
 
   var body: some Scene {
     WindowGroup {
-      M0View(model: model)
+      PlayerScreen(app: app)
     }
   }
 }
