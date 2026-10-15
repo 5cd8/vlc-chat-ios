@@ -56,7 +56,7 @@ Issue #10 の「範囲」（親Issue #1 の機能要件 2（前へ・次へ）�
 | U2 | 再生が始まってから（`.playing`、長さ確定、`seekableChanged` が真）の絶対位置へのシークで、復元できるか。再生が始まってから跳ぶので、最初の一瞬だけ0秒付近が表示されないか（表示・チャット・ロック画面） | チェックG | 6.2節のとおり、`timeChanged` で最大5秒まで再試行する。それでも駄目な形式は、復元できない形式として報告 |
 | U3 | `endReached` が、MP4・MOV・WebM・MKVの実ファイルで、最後まで再生したときに出るか（出ないと、自動進行と「最後まで再生した動画の記憶を消す」が動かない） | チェックE・G（短い動画を最後まで再生する） | `stopped` への遷移＋「位置が長さの近く」で代替判定する案を報告して相談 |
 | U4 | ロック画面・コントロールセンター・PiPの窓の「前へ」「次へ」（`previousTrackCommand`／`nextTrackCommand`）が表示され、押せるか。再生速度・シークの表示、10秒送り・戻し（`skipForward`／`skipBackward`）と両立するか | チェックE | iOSは `skipForward`／`skipBackward` が有効だと、前へ・次への枠にスキップを出すことが多い。**両立しなければ10秒送り・戻しを優先する（ユーザー確定）。報告だけ** |
-| U5 | シート内で `.fileImporter` が開けるか（プレイリストの「追加」・項目のチャット割り当て・設定の絵文字入れ替え）。SwiftUIでは、1つのビューに複数の `.fileImporter` を付けると、最後のものしか効かない既知の落とし穴がある | チェックD・H | 1つの ピッカーの置き場所を変える（6.4節の規則が前提。シート内で出ない場合は、シートを閉じてから `PlayerScreen` のピッカーを開く） |
+| U5 | シート内で `.fileImporter` が開けるか（プレイリストの「追加」・項目のチャット割り当て・設定の絵文字入れ替え）。SwiftUIでは、1つのビューに複数の `.fileImporter` を付けると、最後のものしか効かない既知の落とし穴がある | チェックD・H | 1つのピッカーの置き場所を変える（6.4節の規則が前提。シート内で出ない場合は、シートを閉じてから `PlayerScreen` のピッカーを開く） |
 | U6 | `List` の編集モード（並べ替え）・左スワイプ削除・行内のボタン（チャット割り当て）が、シートの中で期待どおりに動くか。行内のボタンと行全体のタップの競合 | チェックD | ボタンのスタイルを `.borderless` にする（6.4節に最初から採用）。それでも競合すれば、行の末尾のメニュー（`Menu`）に替える |
 | U7 | 自然順（`.numeric`＋`.caseInsensitive`）が、日本語を含む名前で期待どおりに並ぶか | チェックA | 比較を `localizedStandardCompare` に替える（ロケール依存になるので、まず報告） |
 | U8 | iCloud Drive上で、まだ端末にダウンロードされていないファイルを項目にしたとき、解決できるが開けない（読めない）。無効扱いと区別できるか | チェックF | 無効扱いのままにする（区別しない）。ユーザーに報告 |
@@ -160,6 +160,7 @@ public enum VideoChatPairing {
 7. 同じ名前のチャットが2本 → 渡された順の最初だけが使われ、2本目は未対応。同じ名前の動画（`A.mp4`・`A.mkv`）が2本・チャット `A.json` → 最初の動画だけがチャットを得る。
 8. NFDの名前でも対応づく（正規化そのものの担保は5.4のテスト）：動画 `"がぎ.mp4"`（NFC）、チャット `"がぎ.live_chat.json"`（濁点を分解したNFD）→ 対応づく。入力は `"か\u{3099}き\u{3099}"` のように明示的に作る。
 9. 動画0本 → `chatIndexForVideo == []`、チャットはすべて未対応。
+12. 大文字小文字は区別する：動画 `["a.mp4", "b.mp4"]`・チャット `["A.live_chat.json", "B.live_chat.json"]` → `[nil, nil]`（名前の比較は区別し、接尾辞の判定だけ区別しない）。
 10. 接尾辞なしの一致（動画が複数）：動画 `["A.mp4", "B.mp4"]`・チャット `["B.json", "A.json"]` → `[1, 0]`。
 11. 2段の優先：動画 `["X.mp4", "X_chat.mp4"]`・チャット `["X_chat.json"]` → `[nil, 0]`（(1)で `X_chat.mp4` が取る。`X.mp4` は(2)で取れない）。動画 `["X_chat.mp4", "Y.mp4"]`・チャット `["X_chat.json", "Y_chat.json"]` → `[0, 1]`。
 
@@ -192,6 +193,7 @@ public enum SelectionPlanner {
 5. `["x.txt", "a.mp4"]` → `unsupported == [0]`、`videos == [1]`、`pairs == [nil]`。
 6. `[]` → すべて空・nil。
 7. `["a.mp4", "b.mp4", "c.json"]` → `pairs == [nil, nil]`、`ignoredChats == [2]`。
+8. 拡張子の取り出し：`["A.MP4", "README", "B.JSON"]` → `videos == [0]`、`unsupported == [1]`、`pairs == [2]`（動画1本・チャット1本）。
 
 ### 5.4 `VideoIdentity`（確定事項4）
 
@@ -246,7 +248,7 @@ public struct Playlist: Equatable, Sendable {
 ```
 - **現在の項目は添字ではなく `id` で持つ**。並べ替えや削除で添字がずれても、同じ項目を指し続ける。`currentIndex` は `entries` から引く。
 - `remove(at:)`：`index` が範囲外なら何もせず `.notCurrent`。現在の項目を消したときは、消した後の同じ添字の項目（元の「次」）を現在にし、無ければ `currentID = nil`。`.current` を返す。現在が nil のときは常に `.notCurrent`。
-- `move(fromOffsets:toOffset:)`：動かす項目を昇順に取り出し、残りの並びの `toOffset - (toOffset より前にある動かす項目の数)` の位置に挿入する（`Array.move(fromOffsets:toOffset:)` と同じ結果）。範囲外の添字は無視する。
+- `move(fromOffsets:toOffset:)`：動かす項目を昇順に取り出し、残りの並びの `toOffset - (toOffset より前にある動かす項目の数)` の位置に挿入する（`Array.move(fromOffsets:toOffset:)` と同じ結果）。範囲外の添字は無視し、`toOffset` が `count` を超えるときは `count` に丸める。
 - `nextStep`：現在の次から末尾へ向かって、`isPlayable` が真の最初の項目を `target` にし、通り過ぎた（飛ばした）添字を `skipped` に入れる。現在が無い、または有効な項目が無ければ `target = nil`（`skipped` は調べた無効な添字のすべて）。`previousStep` は逆向き。`stepFromCurrent` は、現在の添字から末尾へ向かう（現在が nil なら `target = nil`、`skipped = []`）。
 - `isPlayable` は、App側がブックマークの解決で行う。Coreは判定の方法を知らない。
 
@@ -352,7 +354,7 @@ public struct SettingsStore {
 - **ブックマークの作成**：選ばれたURLを `ScopedFile` でアクセスしている間に、`try url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)` を呼ぶ（U1。オプションが合わなければ CI／実機で直す）。動画のブックマークが作れなければ項目にせず、`failedNames` に名前を入れる。**チャットのブックマークだけが作れなかったときは、動画だけを項目にし**、チャット名を `failedChatNames` に入れる。
 - **ブックマークの解決**：`func resolve(_ data: Data) -> ResolvedFile?`（`struct ResolvedFile { let url: URL; let wasStale: Bool }`）。`URL(resolvingBookmarkData: data, options: [], relativeTo: nil, bookmarkDataIsStale: &stale)`。解決できなければ nil。`stale` が真なら、アクセスしている間に新しいブックマークを作って項目を更新する（保存する）。
 - **有効性**：`func isVideoPlayable(_ entry: PlaylistEntry) -> Bool`＝解決でき、`startAccessingSecurityScopedResource()` した上で `FileManager.default.isReadableFile(atPath:)` が真（終わったら `stop`）。同期の軽い処理なので、自動進行の飛ばす判定からそのまま呼ぶ。`func refreshValidity()` は、全項目の動画とチャットの有効性を求めて `validity` に入れる（シートを開くとき・アプリが前面に戻るとき・追加／削除の後に呼ぶ）。数十項目なので、メインアクターで同期に行ってよい。飛ばした項目・開けなかった項目は、その場で `validity` を偽に更新する。
-- **次・前の探索**：`func nextStep(excluding: Set<UUID> = []) -> Playlist.Step`／`previousStep(excluding:)`／`stepFromCurrent(excluding:)` が、`playlist.nextStep { !excluding.contains($0.id) && isVideoPlayable($0) }` などを包む（`AppModel` は `playlist.playlist.nextStep` と書かない）。**`playItem` が失敗しても現在の項目は動かないので、失敗した項目の `id` は呼び出し側が `excluding` に溜めて再探索する**（溜めないと、読めるのに `open` が失敗する項目を `nextStep` が返し続けて無限ループになる）。再探索は、候補が無くなるまでで必ず終わる。`validity` に無い項目（まだ確かめていない）は、有効として表示する。`resolve` の stale 更新（`updateEntry`＋保存）は、探索・`refreshValidity` の走査の**後**にまとめて行う。
+- **次・前の探索**：`func nextStep(excluding: Set<UUID> = []) -> Playlist.Step`／`previousStep(excluding:)`／`stepFromCurrent(excluding:)` が、`playlist.nextStep { !excluding.contains($0.id) && isVideoPlayable($0) }` などを包む（`AppModel` は `playlist.playlist.nextStep` と書かない）。**`playItem` が失敗しても現在の項目は動かないので、失敗した項目の `id` は呼び出し側が `excluding` に溜めて再探索する**（溜めないと、読めるのに `open` が失敗する項目を `nextStep` が返し続けて無限ループになる）。再探索は、候補が無くなるまでで必ず終わる。`validity` に無い項目（まだ確かめていない）は、有効として表示する。`resolve` の stale 更新（`updateEntry`＋保存。名前が変わっていれば `videoFileName`／`chatFileName` も解決したURLの `lastPathComponent` に更新する）は、探索・`refreshValidity` の走査の**後**にまとめて行う。
 - **操作**：
   - `func replace(videos: [URL], chats: [URL?]) -> ReplaceResult`（`struct ReplaceResult { var failedNames: [String]; var failedChatNames: [String] }`）。**置き換えの前の `Playlist` と `validity` をスナップショットとして保持**し、`func restoreSnapshot()` で戻して保存する（`commit()` でスナップショットを捨てる）。試行中の内容も変更のたびに保存する（巻き戻したときに保存し直す）。
   - `func append(videos: [URL], chats: [URL?]) -> ReplaceResult`、`remove(at:)`、`move(fromOffsets:toOffset:)`、`setCurrent(id:)`、`assignChat(entryID:url:)`。それぞれ `Playlist` の対応する操作を呼び、保存する。
@@ -367,19 +369,19 @@ public struct SettingsStore {
 | `currentIdentity: VideoIdentity?` | 開いた動画の識別（`fileSizeBytes`（`Int?`）を `Int64` にして、`url.lastPathComponent` と組む。取れなければ nil＝記憶しない） | `open` 成功で設定。`stop()` で nil |
 | `savedPosition: TimeInterval?` | `resumeLookup(identity)` で得た保存済みの位置 | `open` 成功で設定。復元を試し終えたら nil |
 | `restoreCompleted: Bool` | 復元が済んだ（またはしないと決まった） | `open` で偽。`savedPosition == nil`／`startPosition` が nil／シークが `true` を返したとき真 |
-| `playingSince: Date?` | 最初の `.playing` になった時刻 | `open` で nil。最初の `.playing` で設定 |
+| `playingSince: Date?` | 最初の `.playing` になった時刻 | `open` で nil。最初の `.playing` で設定。`open` の「再生中に差し替えたとき `.playing` の通知が来ない場合」の分岐（`if player.state == .playing { clock.play(at: now) }`、`PlayerModel.swift` 109〜111行）でも同時に設定する |
 | `isSeekable: Bool` | `.seekableChanged(let seekable)` のイベントの値 | `open` で偽。イベントで更新（`player.isSeekable` は読まない。内部値の更新とイベント配送の順が保証されないため） |
 | `hasReachedEnd: Bool` | `endReached` を受けた | `endReached` で真。`open` で偽（**`recordPosition()` を呼んだ後に**下ろす）。次の `.playing` への遷移でも偽 |
 
-- **復元**：`@ObservationIgnored var resumeLookup: ((VideoIdentity) -> TimeInterval?)?`。**復元のシークは、時計が `.playing` になってから行う**（`PlaybackClock.seek(to:at:)` は時計が `.stopped` だと何もしない（`PlaybackClock.swift` 105〜107行の `guard mode != .stopped`）ので、`open` の途中や `lengthChanged` の時点で呼ぶと時計に反映されない）。`stateDidChange(.playing)` と、その後の `timeChanged` のたびに、`restoreCompleted` が偽で `duration > 0` かつ `isSeekable` なら試す：`ResumeRules.startPosition(saved: savedPosition, duration: duration)` が nil → `restoreCompleted = true`（先頭から）。位置があれば `seek(toSeconds:)`、`true` なら `restoreCompleted = true`、`false` なら次の `timeChanged` で再試行する。`isResumePending` が偽になった（5秒を過ぎた）ら試すのをやめる。
+- **復元**：`@ObservationIgnored var resumeLookup: ((VideoIdentity) -> TimeInterval?)?`。**復元のシークは、時計が `.playing` になってから行う**（`PlaybackClock.seek(to:at:)` は時計が `.stopped` だと何もしない（`PlaybackClock.swift` 105〜107行の `guard mode != .stopped`）ので、`open` の途中や `lengthChanged` の時点で呼ぶと時計に反映されない）。`stateDidChange(.playing)`（**`clock.play(at:)` の後**。時計が `.stopped` だと `clock.seek` は何もしない）と、その後の `timeChanged` のたびに、`restoreCompleted` が偽で `duration > 0` かつ `isSeekable` なら試す：`ResumeRules.startPosition(saved: savedPosition, duration: duration)` が nil → `restoreCompleted = true`（先頭から）。位置があれば `seek(toSeconds:)`、`true` なら `restoreCompleted = true`、`false` なら次の `timeChanged` で再試行する。`isResumePending` が偽になった（5秒を過ぎた）ら試すのをやめる。
   - **`seek(toSeconds:)`（`PlayerModel.swift:174`）に `@discardableResult` を付け、受け付けられたら `true` を返す**。`true` は「受け付けられた」であって「その位置に着地した」ではない（コメントに書く）。既存の呼び出し側（`ControlsView`、リモートの `seek` ハンドラ）は影響を受けない。
   - **`:start-time` オプションは使わない**（タイムラインが切り詰められる。2節）。復元したら `記憶 復元 <名前> <位置>s` をログに残す。再生が始まってから跳ぶので、最初の一瞬は0秒付近が表示され得る（U2で観察）。
   - `startObserving()` のイベントの絞り込みに `.seekableChanged` と `.endReached` を足す。
-- **記録**：`@ObservationIgnored var positionRecorder: ((VideoIdentity, TimeInterval) -> Void)?`。再生中（`clock.mode == .playing`）に5秒ごと（`init` で起動する `Task` のループ。M1の他のポーリングと同じ作り）、一時停止したとき（`stateDidChange(.paused)`）、前面から離れるとき（`sceneDidChange` で `isActive == false`）、別の動画に替える前（`open` の冒頭）、停止の前に、`recordPosition()` を呼ぶ。`recordPosition()` は、`currentIdentity` が有り、`ResumeRules.shouldRecord(position: clock.position(at: now), isClockStopped: clock.mode == .stopped, isResumePending: ResumeRules.isResumePending(secondsSincePlaying: playingSince.map { now.timeIntervalSince($0) }, restoreCompleted: restoreCompleted), hasReachedEnd: hasReachedEnd)` が真のときだけ `positionRecorder` に渡す。
+- **記録**：`@ObservationIgnored var positionRecorder: ((VideoIdentity, TimeInterval) -> Void)?`。再生中（`clock.mode == .playing`）に5秒ごと（`init` で起動する `Task` のループ。`DiagnosticsModel` の `timerTask` と同じ作り）、一時停止したとき（`stateDidChange(.paused)`）、前面から離れるとき（`sceneDidChange` で `isActive == false`）、別の動画に替える前（`open` の冒頭）、停止の前に、`recordPosition()` を呼ぶ。`recordPosition()` は、`currentIdentity` が有り、`ResumeRules.shouldRecord(position: clock.position(at: now), isClockStopped: clock.mode == .stopped, isResumePending: ResumeRules.isResumePending(secondsSincePlaying: playingSince.map { now.timeIntervalSince($0) }, restoreCompleted: restoreCompleted), hasReachedEnd: hasReachedEnd)` が真のときだけ `positionRecorder` に渡す。
 - **終了の検出**：`handle(_:)` に `case .endReached:` を足し、`hasReachedEnd = true`、ログ（`再生 終了 <名前>`）、`onEnded?(currentIdentity)`（`@ObservationIgnored var onEnded: ((VideoIdentity?) -> Void)?`）の順で処理する。`playbackGeneration` の確認（`handle` の冒頭）は、そのまま効く。
 - **停止**：2つの操作を持つ。
   - `stopKeepingTitle()`：再生中でも停止中でも、`recordPosition()` の後に `player.stop()` を呼び、時計を停止して位置を0に戻し、`syncClockState()`・`updateRemote()` を呼ぶ。`title`・`duration`・`currentFile`・`currentIdentity` は残す（M1の「終端で停止して先頭に戻る」状態と同じ。`PlayerModel.play()` は `.stopping` では何もしない（145〜146行）ので、停止の後に再生ボタンで同じ動画をやり直せるかを実機で確かめる）。
-  - `stop()`：動画を閉じる。`recordPosition()` の後に `player.stop()`、時計の停止、`duration`・`title`・`currentFile`・`currentIdentity` を nil、`remote?.update(nil)`。M1の `open` の失敗時の後始末と共通の処理にする。`chat.reset()` は `PlayerModel` が `chat` を持たないので、`AppModel` 側で呼ぶ。
+  - `stop()`：動画を閉じる。`recordPosition()` の後に `player.stop()`、時計の停止、`duration`・`title`・`currentFile`・`currentIdentity` を nil、`remote?.update(nil)`。M1の `open` の失敗時の後始末（88〜97行の、時計・`duration`・`title`・`currentFile`・`remote` のリセット）を切り出して共通にする（`player.stop()` と `recordPosition()` は `stop()` 側だけ）。`open` の失敗時の経路でも `currentIdentity` を nil にする。`chat.reset()` は `PlayerModel` が `chat` を持たないので、`AppModel` 側で呼ぶ。
 - **ナビゲーションの状態**：`@ObservationIgnored var navigationState: (() -> (canGoPrevious: Bool, canGoNext: Bool))?` を、`updateRemote()` が読んで `remote?.update(_, canGoPrevious:, canGoNext:)` に渡す。`func refreshRemote()`（`updateRemote()` を呼ぶだけ）を公開する。
 - `open(url:)` の戻り値・エラー処理・`openCount` は変えない。
 
@@ -389,7 +391,7 @@ public struct SettingsStore {
 - `install(handlers:)` に `add(commands.nextTrackCommand, name: "nextTrack") { _ in handlers.next }`、`previousTrackCommand` も同様に足す。現在 `isEnabled = false` にしている2行（98〜99行）は消す。
 - `update(_ state: NowPlayingState?, canGoPrevious: Bool = false, canGoNext: Bool = false)`（既定値で既存の `update(nil)` を通す）：`state == nil` のときは、2つとも無効。そうでなければ `previousTrackCommand.isEnabled = canGoPrevious`、`nextTrackCommand.isEnabled = canGoNext`。`setPlaybackCommands(enabled:)` の既存の一覧には含めない。
 - `NowPlayingState`（Core）は変えない。
-- **ロック画面で前へ・次へと10秒送り・戻しが両立しない場合（U4）：ユーザーが確定（2026-10-16）。10秒送り・戻しを優先する**。`previousTrackCommand`／`nextTrackCommand` は有効にして登録するが、両立せずロック画面・コントロールセンターに出ないなら、それを受け入れる（`skipForward`／`skipBackward` は無効にしない。画面のボタンとPiPの窓は前へ・次へが使える）。実機で出るかを報告するだけでよい。
+- **ロック画面で前へ・次へと10秒送り・戻しが両立しない場合（U4）：ユーザーが確定（2026-10-16）。10秒送り・戻しを優先する**。`previousTrackCommand`／`nextTrackCommand` は有効にして登録するが、両立せずロック画面・コントロールセンターに出ないなら、それを受け入れる（`skipForward`／`skipBackward` は無効にしない。画面のボタンは前へ・次へが使える。PiPの窓の前へ・次へはU4で確かめる）。実機で出るかを報告するだけでよい。
 
 ### 6.4 `AppModel` の変更（選択の振り分け・項目の再生・自動進行）
 
@@ -397,7 +399,7 @@ public struct SettingsStore {
 
 **ファイルピッカーとアラートの置き場所（U5）**：SwiftUIは、シートを表示している間、その下のビューからは別の画面（ピッカー・アラート）を重ねて出せない。そこで**表示を行うビューごとに、`.fileImporter` を1つ、`.alert`（`app.alertMessage`）を1つずつ付ける**。
 - `PlayerScreen`：`.fileImporter`（`open`：`[.item]` 複数）と `.alert`（M2のまま）。
-- `PlaylistView`：`.fileImporter` を1つ。用途は `@State enum ImportPurpose { case append, assignChat(UUID) }`（`append`：`[.item]` 複数／`assignChat`：`[.json]` 1つ）で切り替える。`.alert` も付ける。
+- `PlaylistView`：`.fileImporter` を1つ。用途は `enum ImportPurpose { case append, assignChat(UUID) }` 型の `@State var`（`append`：`[.item]` 複数／`assignChat`：`[.json]` 1つ）で切り替える。`.alert` も付ける。
 - `SettingsView`：`.fileImporter` を1つ（`[.item]` 1つ。絵文字ライブラリの入れ替え）。`.alert` も付ける。
 - 3つの `.alert` は同じ `app.alertMessage` を見るので、**シートが表示されている間は、シート側だけが `isPresented` を真にし、`PlayerScreen` 側は偽にする**（`showsPlaylist || showsSettings` のとき `PlayerScreen` の `.alert` を出さない）。閉じる処理（Binding の `set`）は、M2と同じく各 `.alert` の1箇所だけで `dismissAlert()` を呼ぶ。診断シートの表示中は `PlayerScreen` の `.alert` が出せないが、通知は閉じるまで待たせる（M2と同じ。許容）。
 - 結果は `AppModel` の用途ごとのメソッド（`handlePicked`／`appendPicked`／`assignChatPicked`／`replaceEmojiPicked`）に渡す。
@@ -408,7 +410,7 @@ public struct SettingsStore {
 3. 置き換えの確定：新しいプレイリストの先頭から順に `playlist.stepFromCurrent()`（現在は先頭）で有効な項目を探し、`playItem(at:byUser: false)` で再生する。失敗（`false`）したら、その項目の `id` を `excluding` に加えて `validity` を偽にし、`stepFromCurrent(excluding:)` 相当で次の有効な項目へ進む（現在は動かないので、`excluding` で進める）。**1つでも成功したら `commit()`**。全部失敗したら `restoreSnapshot()` で元に戻し、通知「再生できる項目がありません」。失敗した項目の名前は集めて、通知「開けない項目を飛ばしました: …」を1件にまとめる（`open` は冒頭で `openError = nil` にするので、途中の失敗理由は残らず、最後の `openError` のアラートだけが出る。通知とアラートは別の行として並ぶ）。
 4. 動画が無くチャットだけのとき（`soleChatIndex`）：**`playback.title == nil` なら通知「先に動画を開いてください」**（起動直後に復元された `currentID` があっても、再生中ではない）。`title != nil` なら、現在の項目に割り当て（`assignChat`）、`chat.load(url:)` で読み込む。`ignoredChats`（2つ目以降）があれば通知で知らせる。
 
-**`appendPicked(urls:)`**：同じ `SelectionPlanner` を使い（`ignoredChats` は通知「対応する動画が無いチャットを無視しました: …」、`assignChat` でブックマークを作れなければ通知「チャットを開けませんでした: 名前」）、動画があれば `PlaylistModel.append`（再生位置は変えない）。`emojiLibrary` は取り込まず通知「絵文字ライブラリは設定から入れ替えてください」。動画が無ければ通知「追加は動画を選んでください。チャットは項目のチャットの欄から割り当てられます」。追加の後に `playback.refreshRemote()`。
+**`appendPicked(urls:)`**：同じ `SelectionPlanner` を使い（`ignoredChats` は通知「対応する動画が無いチャットを無視しました: …」、`PlaylistModel.append` の戻り値 `failedNames`（通知「開けないファイルがありました: …」）と `failedChatNames`（通知「チャットを開けませんでした: …」）は、`handlePicked` の手順2と同じ組で通知する。`assignChat` でブックマークを作れなければ通知「チャットを開けませんでした: 名前」）、動画があれば `PlaylistModel.append`（再生位置は変えない）。`emojiLibrary` は取り込まず通知「絵文字ライブラリは設定から入れ替えてください」。動画が無ければ通知「追加は動画を選んでください。チャットは項目のチャットの欄から割り当てられます」。追加の後に `playback.refreshRemote()`。
 
 **`playItem(at index: Int, byUser: Bool) -> Bool`**（プレイリスト画面のタップ、自動進行、前へ・次へ、置き換えから呼ぶ。成功＝`openCount` が増えた）：
 1. `playback.recordPosition()`。
@@ -425,7 +427,7 @@ public struct SettingsStore {
 
 **プレイリスト画面の操作**（`PlaylistView` から呼ぶ）：
 - 項目のタップ → `playItem(at:byUser: true)`。
-- 左スワイプの削除 → `IndexSet` の添字を**大きい方から**1つずつ `remove(at:)` し、**すべて消し終えてから**、現在が消えたかを1回だけ判断する。現在が消えたとき：`playback.title == nil`（起動直後など、再生中でない）なら何もしない（再生は始めない）。`title != nil` なら、`playlist.stepFromCurrent()` で有効な項目を探し（現在の項目＝元の次自身が無効なら、`validity` を更新して通知に加える）、`target` があれば `playItem(byUser: false)`（失敗したら `excluding` に加えて再探索）、無ければ、または全部失敗したら `playback.stop()` と `chat.reset()`（削除した動画や、現在の項目と食い違う動画を再生し続けない）。
+- 左スワイプの削除 → `IndexSet` の添字を**大きい方から**1つずつ `remove(at:)` し、**すべて消し終えてから**、現在が消えたかを1回だけ判断する。現在が消えたとき：`playback.title == nil`（起動直後など）または時計が停止中（`stopKeepingTitle()` の後など）なら、現在だけを付け替えて何もしない（音を出さない）。再生中または一時停止中なら、`playlist.stepFromCurrent()` で有効な項目を探し（現在の項目＝元の次自身が無効なら、`validity` を更新して通知に加える）、`target` があれば `playItem(byUser: false)`（失敗したら `excluding` に加えて再探索）、無ければ、または全部失敗したら `playback.stop()` と `chat.reset()`（削除した動画や、現在の項目と食い違う動画を再生し続けない）。
 - 並べ替え → `playlist.move(fromOffsets:toOffset:)`。
 - 「追加」→ 用途 `append` のピッカー → `appendPicked`。
 - 項目のチャットの欄のタップ → 用途 `assignChat(entryID)` のピッカー。割り当てた後、**その項目が現在の項目で、`playback.title != nil` のときだけ** `chat.load(url:)` する。
@@ -438,7 +440,7 @@ public struct SettingsStore {
 ### 6.5 画面
 
 **`PlayerScreen`**：
-- 動画を開いていない（`title == nil`）とき、動画領域に「ファイルを選択」を出す（M2のとおり）。**プレイリストが空でなければ**、その横に「プレイリスト」ボタンも出す（確定事項9）。右上に設定（歯車）の小さいボタンも出す（歯車は常に出す。ユーザー確定で、Issue #10 の「画面の入口」も更新済み）。
+- 動画を開いていない（`title == nil`）とき、動画領域に「ファイルを選択」を出す（M2のとおり）。**プレイリストが空でなければ**、その横に「プレイリスト」ボタンも出す（確定事項9）。右上に設定（歯車）の小さいボタンも出す（歯車は常に出す（`title == nil` の動画領域の右上にも、プレイリストが空でも出す。再生中は `ControlsView` の設定ボタンが担うので、動画領域の歯車は `title == nil` のときだけ）。ユーザー確定で、Issue #10 の「画面の入口」も更新済み）。
 - `@State var showsPlaylist`、`showsSettings`。`.sheet` を2つ付ける（`PlaylistView`・`SettingsView`。`presentationDetents([.medium, .large])`）。
 
 **`ControlsView`**：`ControlsView(model:playlist:onPickFile:onShowPlaylist:onShowSettings:onPrevious:onNext:)`。
@@ -457,7 +459,7 @@ public struct SettingsStore {
 - 「このアプリについて」：「ライセンス」（`NavigationLink` → `LicensesView`）、バージョン（`diagnostics.versionText`）。
 
 **`LicensesView`**：2つのライブラリを並べる。
-- SwiftVLC：MIT、Copyright (c) 2025 Omar Albeik、使用版 1.1.0-beta.14、入手先 `https://github.com/harflabs/SwiftVLC`。全文はアプリに同梱した `SwiftVLC-MIT.txt`。
+- SwiftVLC：MIT、Copyright (c) 2025 Omar Albeik、使用版は `AppModel.swiftVLCVersion`（`AppModel.swift` 10行）を使う（版の文字列を重複して持たない）、入手先 `https://github.com/harflabs/SwiftVLC`。全文はアプリに同梱した `SwiftVLC-MIT.txt`。
 - libVLC：LGPL-2.1以降、VideoLAN。SwiftVLC が同梱するxcframeworkは、VideoLAN の vlc（`https://code.videolan.org/videolan/vlc`）に SwiftVLC 独自のパッチを当てたもの。固定したコミットとパッチは、SwiftVLC の v1.1.0-beta.14 タグの `scripts/build-libvlc.sh` と `scripts/patches/`。再ビルドの手順はこのアプリのリポジトリの `.github/workflows/build-ipa.yml` と `scripts/make-ipa.sh`（`https://github.com/5cd8/vlc-chat-ios`）。LGPL-2.1の全文は同梱した `LGPL-2.1.txt`。
 - 全文は、`Bundle.main.url(forResource:withExtension:)` で読んで、スクロールできるテキストで出す（読めなければ「全文を読み込めませんでした」）。URLは `Link` で出す（タップで既定のブラウザ。オフラインでは開けない）。
 - 文言は `.github/workflows/build-ipa.yml` の `NOTES` と同じ内容に揃える。
@@ -470,6 +472,8 @@ public struct SettingsStore {
 
 ### 6.7 その他の注意
 
+- 停止（`stopKeepingTitle()`）の後に再生ボタンで先頭から再生し直すと、`restoreCompleted` が真のままなので、1秒を過ぎた時点で直前の記録が上書きされる。仕様として受け入れる。
+- `nextItem()`／`previousItem()`／削除の再探索で `skipped` の名前が重複し得るので、通知は名前の重複を除いて1件にまとめる。
 - `RemoteControlController.swift` 23行付近の「nextTrack などは常に無効」というコメントは、前へ・次へを有効にした後は事実と合わないので、書き換える。
 - `minimumPosition`（1秒）により、先頭近く（1秒未満）まで戻して別の動画へ移ると古い位置が残り、次に開いたときそこから再生される。意図した挙動（先頭付近は記録しない）なので、`ResumeRules` のコメントにその旨を残す。
 - チェックGの「プレイリストに無い動画を『ファイルを選択』で開き直す」はプレイリストを置き換えるので、チェックの最後に行う。
