@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import VLCChatCore
 
 struct PlaylistView: View {
   let app: AppModel
