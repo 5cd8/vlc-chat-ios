@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import Observation
 import VLCChatCore
@@ -43,6 +42,9 @@ final class ChatModel {
     // `Task.detached` が返すタスク自身を持つので、`cancel()` が読み込みの `Task.isCancelled` に届く。
     loadTask = Task.detached(priority: .utility) { [weak self] in
       let started = Date()
+      // このメモリの値は、動画を同時に開いたときはその読み込みも含む（動画が大きいほど増える。実機で、
+      // 32GBの動画で約+600MB）。チャット自体の保持量は `ストア≈` が示し、実測でも読み込み後の増分は
+      // 数MBだった。読み込み中のピークは、JSONの一時オブジェクトで一時的に上がるが、約1分で戻る。
       let memoryBefore = MemoryProbe.physFootprintMB()
       var peak = memoryBefore ?? 0
       let outcome: Result<ChatLoadResult, Error>
@@ -51,12 +53,8 @@ final class ChatModel {
         let result = try ChatLoader.load(
           from: source,
           isCancelled: { Task.isCancelled },
-          progress: { count in
-            if let current = MemoryProbe.physFootprintMB() {
-              peak = max(peak, current)
-              // 増え方（件数に比例するか）を見るための途中経過。
-              AppLog.write(String(format: "チャット読み込み 途中 件数=%d メモリ=%.0fMB", count, current))
-            }
+          progress: { _ in
+            if let current = MemoryProbe.physFootprintMB() { peak = max(peak, current) }
           }
         )
         outcome = .success(result)
@@ -71,15 +69,11 @@ final class ChatModel {
           result.store.uniqueStringCount)
       }
       let memoryAfter = MemoryProbe.physFootprintMB()
-      // 読み込み中の一時オブジェクトで膨らんだ空きページを、OSへ返す。返した後の値との差で、
-      // 増えた分が実際に保持されているのか、解放済みで空いているだけなのかが分かる。
-      malloc_zone_pressure_relief(nil, 0)
-      let memoryReleased = MemoryProbe.physFootprintMB()
       // ファイルのスコープは、読み終えるまで保つ。
       withExtendedLifetime(file) {}
       let memoryText = String(
-        format: "メモリ=%.0f→%.0fMB（ピーク%.0fMB、解放後%.0fMB）", memoryBefore ?? 0, memoryAfter ?? 0,
-        max(peak, memoryAfter ?? 0), memoryReleased ?? 0) + storeText
+        format: "メモリ=%.0f→%.0fMB（ピーク%.0fMB）", memoryBefore ?? 0, memoryAfter ?? 0,
+        max(peak, memoryAfter ?? 0)) + storeText
       await self?.finish(generation: gen, name: name, outcome: outcome, elapsed: elapsed, memoryText: memoryText)
     }
   }
