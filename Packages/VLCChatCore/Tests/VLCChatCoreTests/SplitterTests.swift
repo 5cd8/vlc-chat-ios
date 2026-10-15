@@ -131,6 +131,15 @@ struct JSONObjectSplitterTests {
     #expect(result.outcome == .arrayFound)
   }
 
+  @Test("入れ子の中のcommentsは配列として扱わない（深さ1のキーだけ）") func ignoresNestedCommentsKey() {
+    let json = #"{"video":{"comments":[{"x":1}]},"comments":[{"a":1}]}"#
+    for size in [1, 6, 1000] {
+      let result = splitObjects(json, size: size)
+      #expect(result.elements == [#"{"a":1}"#], "size=\(size)")
+      #expect(result.outcome == .arrayFound)
+    }
+  }
+
   @Test("commentsに似たキーや値では配列に入らない") func ignoresLookalikeKeys() {
     let json = #"{"commentsX":[{"a":1}],"k":"comments","comments2":[{"b":2}]}"#
     let result = splitObjects(json, size: 5)

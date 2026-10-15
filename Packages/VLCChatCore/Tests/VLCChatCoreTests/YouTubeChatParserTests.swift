@@ -68,6 +68,7 @@ struct YouTubeChatParserTests {
     #expect(YouTubeChatParser.parse(line: youTubeLine(renderer: "liveChatTickerPaidMessageItemRenderer")) == nil)
     #expect(YouTubeChatParser.parse(line: youTubeLine(renderer: "liveChatPlaceholderItemRenderer")) == nil)
     #expect(YouTubeChatParser.parse(line: youTubeLine(renderer: "liveChatPaidStickerRenderer")) == nil)
+    #expect(YouTubeChatParser.parse(line: youTubeLine(renderer: "liveChatViewerEngagementMessageRenderer")) == nil)
     #expect(YouTubeChatParser.parse(line: jsonObject(#"{"other":1}"#)) == nil)
     #expect(YouTubeChatParser.parse(line: jsonObject(#"{"replayChatItemAction":{"actions":[]}}"#)) == nil)
   }
@@ -78,6 +79,8 @@ struct YouTubeChatParserTests {
     }
     #expect(role("[\(badge(icon: "OWNER", tooltip: "Owner"))]") == .owner)
     #expect(role("[\(badge(icon: "MODERATOR", tooltip: "Moderator"))]") == .moderator)
+    #expect(role("[\(badge(icon: "owner"))]") == .owner)
+    #expect(role("[\(badge(icon: "Moderator"))]") == .moderator)
     #expect(role("[\(badge(tooltip: "owner"))]") == .owner)
     #expect(role("[\(badge(tooltip: "Moderator (x)"))]") == .moderator)
     #expect(role("[\(badge(icon: "VERIFIED", tooltip: "認証済み"))]") == .normal)

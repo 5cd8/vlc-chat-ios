@@ -42,11 +42,18 @@ public struct FileByteSource: ChatByteSource {
     // 閉じた後の `FileHandle` を読むと投げるので、終端に達したら以後は読まずに `nil` を返す。
     guard !isFinished else { return nil }
     // 終端では `nil` ではなく空の `Data` が返ることがあるので、両方を終端として扱う。
-    guard let data = try handle.read(upToCount: chunkSize), !data.isEmpty else {
+    // `read` が作る `NSData` は自動解放プールに積まれる。読み込みは1つの長い同期処理なので、
+    // 1チャンクごとにプールを空けないと、ファイル全体ぶんが溜まる（182MBのチャットで、読み込み中のメモリが
+    // ファイルの大きさとほぼ同じだけ一時的に増えた。M2実機）。
+    let chunk: [UInt8]? = try autoreleasepool {
+      guard let data = try handle.read(upToCount: chunkSize), !data.isEmpty else { return nil }
+      return [UInt8](data)
+    }
+    guard let chunk else {
       isFinished = true
       try? handle.close()
       return nil
     }
-    return [UInt8](data)
+    return chunk
   }
 }

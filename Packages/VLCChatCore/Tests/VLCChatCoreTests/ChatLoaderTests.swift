@@ -142,6 +142,15 @@ struct ChatLoaderTests {
     #expect(youTube.skipped == 2)
   }
 
+  @Test("進捗は5000件ごとと、最後に1回渡す") func reportsProgressEvery5000Items() throws {
+    var reported: [Int] = []
+    let comments = (0..<5001).map { twitchComment(offset: $0, body: "m") }.joined(separator: ",")
+    let file = Array(#"{"comments":[\#(comments)]}"#.utf8)
+    _ = try ChatLoader.load(
+      from: DataByteSource(Data(file), chunkSize: 100_000), isCancelled: { false }, progress: { reported.append($0) })
+    #expect(reported == [5000, 5001])
+  }
+
   @Test("進捗は最後に件数を1回渡す") func reportsFinalCount() throws {
     var reported: [Int] = []
     _ = try ChatLoader.load(
