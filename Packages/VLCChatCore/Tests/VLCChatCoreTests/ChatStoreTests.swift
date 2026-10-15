@@ -80,7 +80,7 @@ struct ChatStoreTests {
     }
     let store = builder.finish()
     #expect(store.count == 1000)
-    #expect(store.stringTableCount == 3)
+    #expect(store.uniqueStringCount == 3)
   }
 
   @Test("Int32に収まらない時刻は追加されない") func dropsOutOfRangeTime() {

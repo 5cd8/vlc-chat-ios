@@ -50,11 +50,9 @@ public final class ChatStore: Sendable {
     return total
   }
 
-  /// 診断用。文字列表（投稿者名・URL・代替テキスト）の種類数。
+  /// 診断用（完了ログの `ストア≈` に出し続ける）。文字列表（投稿者名・URL・代替テキスト）の種類数。
   public var uniqueStringCount: Int { strings.count }
 
-  /// テスト用。文字列表（投稿者名・URL・代替テキスト）の件数。
-  var stringTableCount: Int { strings.count }
   /// テスト用。並べ替えの表を持たない（追加順がすでに昇順）か。
   var usesIdentityOrder: Bool { order == nil }
 
@@ -163,11 +161,11 @@ public struct ChatStoreBuilder {
     for run in kept {
       switch run {
       case .text(let text):
-        let bytes = Array(text.utf8)
+        let start = textArena.count
+        textArena.append(contentsOf: text.utf8)
         runKinds.append(0)
-        runA.append(UInt32(textArena.count))
-        runB.append(UInt32(bytes.count))
-        textArena.append(contentsOf: bytes)
+        runA.append(UInt32(start))
+        runB.append(UInt32(textArena.count - start))
       case .emoji(let url, let alt):
         runKinds.append(1)
         runA.append(intern(url))

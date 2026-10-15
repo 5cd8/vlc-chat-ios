@@ -50,7 +50,7 @@ actor EmojiLibrary {
 
   // MARK: - 取り込み
 
-  /// 取り込んだ行数を返す。失敗したら投げる（今あるライブラリは変えない）。
+  /// 取り込んだ行数とファイルの大きさを返す。失敗したら投げる（今あるライブラリは変えない）。
   func importLibrary(from source: URL) throws -> ImportResult {
     let file = ScopedFile(url: source)
     let sizeMB = file.fileSizeBytes.map { Double($0) / 1_048_576 } ?? 0

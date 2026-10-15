@@ -92,6 +92,41 @@ struct ChatLoaderTests {
     #expect(calls == 3)
   }
 
+  @Test("先頭の判定に足りない小さいファイルも、FileByteSource経由で最後まで読める") func loadsSmallFileFromDisk() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("small-chat-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try Data(youTubeText.utf8).write(to: url)
+    // 4099バイト未満なので、先読みで終端に達した後にもう一度読みにいく。
+    let result = try ChatLoader.load(from: try FileByteSource(url: url), isCancelled: { false }, progress: { _ in })
+    #expect(result.store.count == 1)
+
+    try Data().write(to: url)
+    #expect(throws: ChatLoaderError.unreadable) {
+      try ChatLoader.load(from: try FileByteSource(url: url), isCancelled: { false }, progress: { _ in })
+    }
+  }
+
+  @Test("先読みを過ぎたチャンクごとにもキャンセルを確かめる") func cancelsPerChunkAfterFormatDetection() {
+    var calls = 0
+    // 5000バイト（先頭の判定に足りる）を1000バイトずつ。先読みで5回、本体のループで3回目に真になる。
+    let file = Array((#"{"x":""# + String(repeating: "a", count: 5000) + #""}"#).utf8)
+    #expect(throws: ChatLoaderError.cancelled) {
+      try load(file, chunkSize: 1000, isCancelled: { calls += 1; return calls >= 8 })
+    }
+    #expect(calls == 8)
+  }
+
+  @Test("256件ごとにもキャンセルを確かめる") func cancelsEvery256Items() {
+    var calls = 0
+    let file = Array(Array(repeating: youTubeText, count: 600).joined(separator: "
+").utf8)
+    // 全体が1チャンクに入る。先読みで1回、本体のチャンクで1回、256件目で3回目に真になる。
+    #expect(throws: ChatLoaderError.cancelled) {
+      try load(file, chunkSize: 10_000_000, isCancelled: { calls += 1; return calls >= 3 })
+    }
+    #expect(calls == 3)
+  }
+
   @Test("チャットとして読めない入力はunreadable") func throwsUnreadable() {
     for text in ["", #"{"x":1}"#, "[1,2]", #"{"comments":5}"#] {
       #expect(throws: ChatLoaderError.unreadable, "\(text)") { try load(Array(text.utf8), chunkSize: 5) }
