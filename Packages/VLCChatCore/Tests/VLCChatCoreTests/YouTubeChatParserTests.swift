@@ -101,6 +101,11 @@ struct YouTubeChatParserTests {
     #expect(YouTubeChatParser.parse(line: youTubeLine(runs: runs))?.runs == [.text("a"), .text("☺"), .text("b")])
   }
 
+  @Test("画像にもテキストにもならない絵文字でも、前後のテキストは別のrunになる") func emptyEmojiStillSplitsText() {
+    let runs = #"[{"text":"a"},{"emoji":{}},{"text":"b"}]"#
+    #expect(YouTubeChatParser.parse(line: youTubeLine(runs: runs))?.runs == [.text("a"), .text("b")])
+  }
+
   @Test("カスタム絵文字の代替テキストはショートカット、次にラベル、絵文字ID") func customEmojiAltFallsBack() {
     func alt(_ emoji: String) -> ChatRun? {
       YouTubeChatParser.parse(line: youTubeLine(runs: "[{\"emoji\":\(emoji)}]"))?.runs.first

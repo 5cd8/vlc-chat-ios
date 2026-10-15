@@ -14,8 +14,6 @@ struct PlayerScreen: View {
       video(model)
       if model.title != nil {
         ControlsView(model: model) { showsFileImporter = true }
-      }
-      if model.title != nil {
         ChatPanelView(app: app)
       } else {
         Spacer(minLength: 0)

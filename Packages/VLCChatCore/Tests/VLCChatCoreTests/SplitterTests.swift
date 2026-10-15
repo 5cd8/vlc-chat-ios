@@ -138,6 +138,21 @@ struct JSONObjectSplitterTests {
     #expect(result.outcome == .commentsMissing)
   }
 
+  @Test("キー・コロン・括弧の間に空白や改行があっても配列に入る") func readsPrettyPrintedJSON() {
+    let json = "{
+  \"comments\" :
+  [
+    {\"a\": 1},
+    {\"b\": 2}
+  ]
+}"
+    for size in [1, 4, 1000] {
+      let result = splitObjects(json, size: size)
+      #expect(result.elements == [#"{"a": 1}"#, #"{"b": 2}"#], "size=\(size)")
+      #expect(result.outcome == .arrayFound)
+    }
+  }
+
   @Test("配列に入れない入力の結果") func reportsWhyArrayWasNotFound() {
     #expect(splitObjects("[1]", size: 1000).outcome == .rootNotObject)
     #expect(splitObjects(#"{"x":1}"#, size: 1000).outcome == .commentsMissing)

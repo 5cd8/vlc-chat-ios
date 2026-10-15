@@ -9,7 +9,7 @@ public enum TwitchChatParser {
   /// "I subscribed yesterday" のような通常の文も除かれる。
   ///
   /// 正規表現を使わず手で判定する。`String.range(of:options: .regularExpression)` は呼ぶたびに
-  /// 正規表現のオブジェクトを作り、4.6万件の読み込みでメモリが約600MB増えた（M2実機）。
+  /// 正規表現のオブジェクトを作るので、数万件のコメントごとに呼ぶ処理には向かない。
   static func isSubscriptionNotice(_ body: String) -> Bool {
     var index = body.startIndex
     // `\S+`：先頭は空白でない語。その語は丸ごと使われる（後ろに `\s+` が要るため）。

@@ -7,8 +7,9 @@ public enum ChatTextSegment: Equatable, Sendable {
 
 /// 本文中のURLをリンクにする。規則は PC版（`ChatBodyBehavior.cs`）と同じ。
 ///
-/// `https?://\S+` の正規表現は、呼ぶたびにオブジェクトを作ってメモリが増えた（行の描画のたびに呼ばれる）
-/// ので、使わず手で探す。
+/// `https?://\S+` の正規表現は使わず、手で探す。行の描画のたびに呼ばれ、呼ぶたびに `NSRegularExpression`
+/// を作ると、再生中にメモリがじわじわ増えた（M2実機）。`static let` に1回だけ作る手もあるが、Swift 6 の
+/// Package では並行性のエラーになり得て `nonisolated(unsafe)` が要るため、手で探すほうが単純だった。
 public enum ChatLinks {
   /// 末尾から外す句読点。`)` を1文字ずつ外すだけの簡易な規則で、`a_(b)` の `)` も外れる（PC版と同じ）。
   private static let trailingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", ")"]

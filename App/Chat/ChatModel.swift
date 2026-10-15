@@ -42,9 +42,8 @@ final class ChatModel {
     // `Task.detached` が返すタスク自身を持つので、`cancel()` が読み込みの `Task.isCancelled` に届く。
     loadTask = Task.detached(priority: .utility) { [weak self] in
       let started = Date()
-      // このメモリの値は、動画を同時に開いたときはその読み込みも含む（動画が大きいほど増える。実機で、
-      // 32GBの動画で約+600MB）。チャット自体の保持量は `ストア≈` が示し、実測でも読み込み後の増分は
-      // 数MBだった。読み込み中のピークは、JSONの一時オブジェクトで一時的に上がるが、約1分で戻る。
+      // このメモリの値は、動画を同時に開いたときはその読み込みも含む。チャット自体の保持量は
+      // `ストア≈` が示す。
       let memoryBefore = MemoryProbe.physFootprintMB()
       var peak = memoryBefore ?? 0
       let outcome: Result<ChatLoadResult, Error>

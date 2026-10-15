@@ -83,6 +83,15 @@ struct ChatLoaderTests {
     #expect(throws: ChatLoaderError.cancelled) { try load(file, chunkSize: 10, isCancelled: { true }) }
   }
 
+  @Test("commentsを含まない入力でも、チャンクごとにキャンセルが効く") func cancelsEvenWithoutComments() {
+    var calls = 0
+    let file = Array(#"{"video":{"title":"x"},"other":[1,2,3,4,5,6,7,8,9]}"#.utf8)
+    #expect(throws: ChatLoaderError.cancelled) {
+      try load(file, chunkSize: 4, isCancelled: { calls += 1; return calls >= 3 })
+    }
+    #expect(calls == 3)
+  }
+
   @Test("チャットとして読めない入力はunreadable") func throwsUnreadable() {
     for text in ["", #"{"x":1}"#, "[1,2]", #"{"comments":5}"#] {
       #expect(throws: ChatLoaderError.unreadable, "\(text)") { try load(Array(text.utf8), chunkSize: 5) }

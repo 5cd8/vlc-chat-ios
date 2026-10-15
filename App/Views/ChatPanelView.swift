@@ -24,6 +24,8 @@ struct ChatPanelView: View {
     .onChange(of: chat.endIndex) { old, new in
       if new < shownEnd || new - old >= Self.jumpThreshold {
         // 後ろへのシーク、または前へ大きくシークした。古い履歴を残さず最下部へ戻す。
+        // 制限：混んだチャットを高倍速で見ていると、0.25秒の1回の更新でも200件以上進むことがあり、
+        // その場合は遡り中でも最下部へ戻る（シークと区別できないため。許容した）。
         isAtBottom = true
         shownEnd = new
       } else if isAtBottom {
@@ -101,6 +103,8 @@ struct ChatPanelView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
       }
+      // 初回の表示位置を最下部にする。内容の大きさが変わるとき（絵文字の画像の読み込みなど）も最下部寄りに
+      // 保たれるが、遡って読んでいる間は `shownEnd` を止めているので、この指定で動くのは行の高さが変わった分だけ。
       .defaultScrollAnchor(.bottom)
       .onScrollGeometryChange(for: Bool.self) { geometry in
         // 内容が表示領域より短いときも真になる（差の絶対値にすると、短い内容で偽になって止まる）。
