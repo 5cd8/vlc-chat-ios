@@ -139,13 +139,15 @@ struct JSONObjectSplitterTests {
   }
 
   @Test("キー・コロン・括弧の間に空白や改行があっても配列に入る") func readsPrettyPrintedJSON() {
-    let json = "{
-  \"comments\" :
-  [
-    {\"a\": 1},
-    {\"b\": 2}
-  ]
-}"
+    let json = #"""
+      {
+        "comments" :
+        [
+          {"a": 1},
+          {"b": 2}
+        ]
+      }
+      """#
     for size in [1, 4, 1000] {
       let result = splitObjects(json, size: size)
       #expect(result.elements == [#"{"a": 1}"#, #"{"b": 2}"#], "size=\(size)")
