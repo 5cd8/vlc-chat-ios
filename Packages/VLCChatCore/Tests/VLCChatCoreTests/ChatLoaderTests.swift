@@ -118,8 +118,7 @@ struct ChatLoaderTests {
 
   @Test("256件ごとにもキャンセルを確かめる") func cancelsEvery256Items() {
     var calls = 0
-    let file = Array(Array(repeating: youTubeText, count: 600).joined(separator: "
-").utf8)
+    let file = Array(Array(repeating: youTubeText, count: 600).joined(separator: "\n").utf8)
     // 全体が1チャンクに入る。先読みで1回、本体のチャンクで1回、256件目で3回目に真になる。
     #expect(throws: ChatLoaderError.cancelled) {
       try load(file, chunkSize: 10_000_000, isCancelled: { calls += 1; return calls >= 3 })
