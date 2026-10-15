@@ -124,7 +124,7 @@ public final class ChatStore: Sendable {          // 不変。全プロパティ
   public func timeSeconds(at position: Int) -> Int
   public func message(at position: Int) -> ChatMessage         // position は時刻の昇順の位置
   public func endIndex(atSeconds seconds: Int) -> Int          // 「時刻 ≦ seconds」を満たす件数（0 … count）
-  public func window(endIndex: Int) -> Range<Int>              // min(end, count) に丸めてから max(0, end−200) ..< end（別の ChatStore の古い shownEnd でも範囲外にならない）
+  public func window(endIndex: Int) -> Range<Int>              // min(end, count) に丸めてから max(0, end−200) ..< end（`end` は `min(max(end, 0), count)` に丸める。別の ChatStore の古い shownEnd でも範囲外にならない）
 }
 public struct ChatStoreBuilder {
   public init()
@@ -143,6 +143,7 @@ public struct ChatStoreBuilder {
 - `endIndex(atSeconds:)`：二分探索で「時刻 ≦ seconds」の最後の位置＋1。PC版は秒の整数同士の比較（`TimeSeconds <= timeSec`）。
 - `Int32` に収まらない時刻（約68年）、`UInt32` に収まらないバイト数は、`ChatStoreBuilder.append` が `precondition` ではなく**捨てる**（時刻が `Int32` 範囲外なら追加しない）。テキストの合計が4GBを超えることは、ファイル全体で数百MBの前提では起きない（ただし超えたら以降の追加を止めて、`finish()` までに積んだ分で完了する）。
 
+テストは `@testable import VLCChatCore`（既存のテストと同じ）で、内部を観測するために `ChatStore` の `internal` な `stringTableCount: Int` と `usesIdentityOrder: Bool`（`order == nil`）を用意する。`ChatStore` は `Equatable` にしないので、「同じ結果」は `count` と `message(at:)` の全件比較で確かめる。
 テスト（`ChatStoreTests.swift`。手計算の期待値）：
 1. 往復：追加した `ChatMessage`（日本語・絵文字run・空のrun配列・同じ投稿者名の重複）が `message(at:)` で同じ値に戻る。
 2. 昇順の入力：`times=[1,3,3,7]` で、`order == nil`（内部）でも位置と値が追加順どおり。
@@ -162,14 +163,14 @@ public struct DataByteSource: ChatByteSource {     // テスト用。chunkSize �
   public init(_ data: Data, chunkSize: Int)
 }
 ```
-`FileHandle`（`read(upToCount: 1 << 20)`）を使う実装 `FileByteSource(url:)` も同じファイル（Package内。Foundationだけで書ける）に置く。`init(url:chunkSize: Int = 1 << 20) throws`（開けない場合に投げる）、`nextChunk()` も読み込みエラーを投げる。テストは一時ファイルで、`chunkSize` を小さくして `DataByteSource` と同じチャンク列を返すことを確かめる。
+`FileHandle`（`read(upToCount: 1 << 20)`）を使う実装 `FileByteSource(url:)` も同じファイル（Package内。Foundationだけで書ける）に置く。`init(url:chunkSize: Int = 1 << 20) throws`（開けない場合に投げる）、`nextChunk()` も読み込みエラーを投げる。テスト（`ChatByteSourceTests.swift`）は一時ファイルで、`chunkSize` を小さくして `DataByteSource` と同じチャンク列を返すことを確かめる。
 
 **`LineSplitter`**：チャンクを順に `feed(_:handler:)` し、改行（`\n`）で区切った1行を（末尾の `\r` を除いて）`handler(ArraySlice<UInt8>)` に渡す。チャンクをまたぐ行は内部のバッファに持ち越す。`finish(handler:)` で、末尾に改行の無い最後の行を渡す。空行と空白（半角スペース・タブ）だけの行は渡さない（PC版 `IsNullOrWhiteSpace` と同じ）。
 
 **`JSONObjectSplitter`**（Twitch用）：チャンクを順に `feed` し、トップレベルのオブジェクトの `"comments"` 配列の**各要素のオブジェクト**を、バイト列（`[UInt8]`）として `handler` に渡す。状態機械：
 - 深さ（`{` `[` で+1、`}` `]` で−1）、文字列の中か、エスケープ中か、を1バイトずつ追う。**エスケープ中フラグは `\` を見たら反転ではなく「次の1バイトを消費するまで真」とし、消費したら偽に戻す**（`"a\\"`＝文字列 `a\` が引用符で閉じる場合を正しく扱う）。
 - 深さ1で、文字列トークンが `comments` に一致し、続く空白の後に `:`、さらにその後の空白の後に `[` が来たら、配列の中に入る（それまでのトップレベルのプロパティは読み飛ばす）。
-- 配列の中では、深さ2（配列の要素のオブジェクト）の `{` から対応する `}` までを1要素として蓄積し、閉じたら渡す。配列が閉じたら**以降のバイトは読まずに終了**（`embeddedData` などの大きなデータを読まない）。
+- 深さは、ルートの `{` を数えた後を1、`comments` の `[` を数えた後を2とする（要素の `{` は、数える前の深さが2、数えた後が3）。配列の中では、要素の `{`（数える前の深さ2）から対応する `}` までを1要素として蓄積し、閉じたら渡す。配列が閉じたら**以降のバイトは読まずに終了**。`outcome` は、配列に入った時点で `.arrayFound` に確定し、以後は変えない（配列の中で構文が壊れたら、そこまでに渡した要素を有効として `.finished` で終わる。`unreadable` にはしない）。`.undetermined` は、配列に入る前に終端か構文の破損に達した場合（`embeddedData` などの大きなデータを読まない）。
 - 要素がオブジェクトでない（数値・文字列など）場合は読み飛ばす。**結果の返し方：** `feed` は `JSONObjectSplitter.Status`（`.needsMore` / `.finished`）を返す。`.finished` は配列が閉じたとき、または構文が壊れて終了したとき（ローダーはそれ以降のチャンクを読まない）。`status` とは別に `outcome: Outcome`（`.arrayFound` / `.rootNotObject` / `.commentsMissing` / `.commentsNotArray` / `.undetermined`）を持ち、ローダーが `unreadable` を判定する。ルートは、BOMを除いた最初の空白以外のバイトが `{` であること（そうでなければ `.rootNotObject` で終了）。`comments` の値が `[` 以外なら、そこで `.commentsNotArray` として終了する（PC版 `TwitchChatParser.cs` と同じ）。ルートが閉じるまで `comments` が現れなければ `.commentsMissing`。UTF-8のBOM（`EF BB BF`）は先頭で読み飛ばす（`LineSplitter` も同様に先頭のBOMを読み飛ばす。PC版は `StreamReader` が除くため）。ファイルが途中で終わっても、それまでに渡した要素は有効。構文が壊れていて状態が決まらないとき（深さが負になるなど）は、そこで終了する（それまでの結果を使う）。
 
 テスト（`LineSplitterTests.swift`・`JSONObjectSplitterTests.swift`）：
@@ -188,9 +189,9 @@ public enum TwitchChatParser { public static func parse(comment: [String: Any]) 
 ```
 入力は、`JSONSerialization.jsonObject(with:)` の結果（辞書）。**規則は Issue #6 の「PC版を読んで確認した規則」のとおり**（ここに再掲しない）。実装上の決めごと：
 - **YouTube**：`replayChatItemAction.actions[0].addChatItemAction.item` 以下をたどり、キーが無ければ `nil`。レンダラーは `liveChatTextMessageRenderer`・`liveChatPaidMessageRenderer`・`liveChatMembershipItemRenderer` だけ。`timestampText.simpleText` が無い／`-` を含む／パースできない → `nil`。バッジは、`liveChatAuthorBadgeRenderer.icon.iconType`（`OWNER`／`MODERATOR`、大文字小文字を区別しない）または `tooltip` に `Owner`／`Moderator` を含む（大文字小文字を区別しない）。`VERIFIED` やメンバーのバッジは無装飾。オーナー優先。課金・メンバー加入は、runsが空なら `nil`。
-- **YouTubeの絵文字run**：`emoji.image.thumbnails[0].url` を取る。`isCustomEmoji` が `true`（`as? Bool` で判定。`null`・文字列・数値など `JSON` の真偽値でない値は「キーが無い」と同じ扱い。`NSNumber` の0・1は `as? Bool` では真偽値になってしまうため、`CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()` で真偽値かを判定する。PC版の数値の扱いと同じ）なら**カスタム**、キー自体が無ければ**Unicode**、`false` なら画像にしない。画像にする条件（URLがあり、`isCustomEmoji` が true または無い）のとき `.emoji(url:alt:)`。`alt`：カスタム＝`shortcuts[0]` → `image.accessibility.accessibilityData.label` → `emojiId` → `""`。Unicode＝`emojiId` → `label` → `shortcuts[0]` → `""`（Issue #6 確定事項1の順序「label → emojiId」の前に、Unicodeでは emojiId＝絵文字そのものを置く）。画像にしないとき（`isCustomEmoji == false`、または画像URLが無い）は、`emojiId` が空でなければ `.text(emojiId)`。連続する `text`は1つの `.text` に結合し、画像のemojiの前で確定する。ただし `isCustomEmoji:false` などで出した `.text(emojiId)` は、前後のテキストと結合しない（独立したrun。PC版 `ChatParser.cs` と同じ。結合すると直前のURLの `\S+` が絵文字を取り込む）。
+- **YouTubeの絵文字run**：`emoji.image.thumbnails[0].url` を取る。`isCustomEmoji` が `true`（`CFBoolean` であることを確かめてから `as? Bool` で判定。`null`・文字列・数値など `JSON` の真偽値でない値は「キーが無い」と同じ扱い。`NSNumber` の0・1は `as? Bool` では真偽値になってしまうため、`CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()` で真偽値かを先に判定する。PC版の数値の扱いと同じ）なら**カスタム**、キー自体が無ければ**Unicode**、`false` なら画像にしない。画像にする条件（URLがあり、`isCustomEmoji` が true または無い）のとき `.emoji(url:alt:)`。`alt`：カスタム＝`shortcuts[0]` → `image.accessibility.accessibilityData.label` → `emojiId` → `""`。Unicode＝`emojiId` → `label` → `shortcuts[0]`（最後の `shortcuts[0]` はIssueに無い、念のための追加） → `""`（Issue #6 確定事項1の順序「label → emojiId」の前に、Unicodeでは emojiId＝絵文字そのものを置く）。画像にしないとき（`isCustomEmoji == false`、または画像URLが無い）は、`emojiId` が空でなければ `.text(emojiId)`。連続する `text`は1つの `.text` に結合し、画像のemojiの前で確定する。ただし `isCustomEmoji:false` などで出した `.text(emojiId)` は、前後のテキストと結合しない（独立したrun。PC版 `ChatParser.cs` と同じ。結合すると直前のURLの `\S+` が絵文字を取り込む）。
 - **時刻の変換は範囲を確かめてから行う**（壊れた入力で落ちないように）：Twitchは `offset` が `0 ..< Double(Int32.max)` に入るときだけ `Int(offset)`、YouTubeは時が10万未満、分・秒が各々10万未満（`MM:SS` の分も同じ上限）のときだけ掛け算・足し算する。範囲外は `nil`。
-- **Twitch**：`content_offset_seconds`（`as? Double` に加え、`CFBoolean`（JSONの `true`/`false`）は除く。PC版は `ValueKind == Number` だけを通す）が無い／負／有限でない → `nil`。`Int(offset)`（切り捨て）。投稿者名＝`commenter.display_name`（文字列）→ `commenter.name` → `""`。`message.body` がサブスク通知の正規表現（`^\S+\s+(?:subscribed|resubscribed|is gifting|gifted)\b`、`NSRegularExpression`）に一致 → `nil`。バッジ＝`message.user_badges[]._id` が `broadcaster`／`moderator`（完全一致）。`fragments` があれば、`emoticon.emoticon_id`（文字列で空でない）→ `.emoji(url: "https://static-cdn.jtvnw.net/emoticons/v2/\(id)/default/dark/2.0", alt: fragment.text)`、それ以外で `text` が空でなければ `.text`。`fragments` が無く `body` が空でなければ `.text(body)`。runsが空 → `nil`。
+- **Twitch**：`content_offset_seconds`（`as? Double` に加え、`CFBoolean`（JSONの `true`/`false`）は除く。PC版は `ValueKind == Number` だけを通す）が無い／負／有限でない → `nil`。`Int(offset)`（切り捨て）。投稿者名＝`commenter.display_name`（文字列）→ `commenter.name` → `""`。`message.body` がサブスク通知の正規表現（`^\S+\s+(?:subscribed|resubscribed|is gifting|gifted)\b`、`NSRegularExpression`）に一致 → `nil`。バッジ＝`message.user_badges[]._id` が `broadcaster`／`moderator`（完全一致）。`fragments` があれば、`emoticon.emoticon_id`（文字列で空でない）→ `.emoji(url: "https://static-cdn.jtvnw.net/emoticons/v2/\(id)/default/dark/2.0", alt: fragment.text)`、それ以外で `text` が空でなければ `.text`。`fragments` が無い、または配列でないとき（PC版は `body` に戻る）、`body` が空でなければ `.text(body)`。runsが空 → `nil`。
 
 テスト（`YouTubeChatParserTests.swift`・`TwitchChatParserTests.swift`。入力は**合成のJSON文字列**。実データの形（Issue #6 の確認結果）を写し、投稿者名・本文は架空のものにする。実データのファイルはリポジトリに入れない）：
 - YouTube：①テキスト1件（`MM:SS`＝`"12:34"`→754、`H:MM:SS`＝`"1:02:03"`→3723）、②プレチャット（`"-0:05"`）→`nil`、③課金（本文あり→通常、本文なし→`nil`）、④メンバー加入（本文なし→`nil`）、⑤ティッカー・プレースホルダー・課金ステッカー・配信終了メッセージ→`nil`、⑥バッジ（`OWNER`→owner、`MODERATOR`→moderator、tooltipだけ `Owner`、`VERIFIED`・メンバー→normal、両方→owner）、⑦runsの結合（`text,text,emoji,text` → `.text("ab"),.emoji,.text("c")`）、⑧カスタム絵文字（`isCustomEmoji:true`、`shortcuts[0]`＝`:_x:`）→`.emoji(url: thumbnails[0], alt: ":_x:")`、⑨Unicode絵文字（`isCustomEmoji` 無し、`emojiId:"☺"`、URLあり）→`.emoji(url:, alt:"☺")`、⑩`isCustomEmoji:false` と、URLが無い絵文字→`.text(emojiId)`、⑪`shortcuts` が無いカスタム絵文字の `alt` が `label`→`emojiId` の順、⑫`replayChatItemAction` が無い辞書・`actions` が空→`nil`。
@@ -213,7 +214,7 @@ public enum ChatLoader {
   ) throws -> ChatLoadResult
 }
 ```
-流れ：先頭チャンクからBOM（あれば3バイト）＋最大4096バイトを取り（足りなければ次のチャンクも読んで足す）、`detectFormat`（先頭4096バイトを UTF-8 として、**`String(decoding:)` ではなくバイト列の探索**で引用符込みの `"replayChatItemAction"`（22バイト）を探す。先頭4096バイトにBOMは数えに含めない（PC版は `StreamReader` がBOMを除いた後の4096文字を見るため、BOM付きは先頭の3バイトを読み飛ばしてから4096バイトを見る）。PC版は先頭4096**文字**を文字列にして `Contains` するが、Issue の決定に従いバイトで見る。ASCIIのキーなので、実データでは同じ結果になる）。YouTubeは `LineSplitter`、Twitchは `JSONObjectSplitter` に、**先頭の読み込み済みのバイトも含めて**全チャンクを渡す。1行／1要素ごとに、`autoreleasepool { JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any] }` → パーサー → `ChatStoreBuilder.append`。解析できない行は `skipped` に数える。`isCancelled()` を256件ごと、およびチャンクを読むたびに確認して、真なら `ChatLoaderError.cancelled`。**`unreadable` を投げる条件（まとめ：Twitchは `JSONObjectSplitter.outcome` が `.arrayFound` 以外なら `unreadable`。空のデータ・BOMだけ・途中で切れた入力の `.undetermined` も含む）**（Issue #6「読み込めない形式のJSONは「チャットを読み込めませんでした」と表示」）：Twitchは、ルートがオブジェクトでない、`comments` が無い、`comments` の値が配列でない（`JSONObjectSplitter` が配列に入れなかった）。YouTubeは、JSONとして読めた行が0。この条件を満たさず対象のメッセージが0件のときは、空の `ChatStore`（画面は「メッセージがありません」）。`ChatModel` は `unreadable` を `.failed` にする。**ファイルが読めない（`nextChunk` が投げる）場合は、そのエラーを伝える**。
+流れ：先頭チャンクからBOM（あれば3バイト）＋最大4096バイトを取り（足りなければ次のチャンクも読んで足す）、`detectFormat`（先頭4096バイトを UTF-8 として、**`String(decoding:)` ではなくバイト列の探索**で引用符込みの `"replayChatItemAction"`（22バイト）を探す。先頭4096バイトにBOMは数えに含めない（PC版は `StreamReader` がBOMを除いた後の4096文字を見るため、BOM付きは先頭の3バイトを読み飛ばしてから4096バイトを見る）。PC版は先頭4096**文字**を文字列にして `Contains` するが、Issue の決定に従いバイトで見る。ASCIIのキーなので、実データでは同じ結果になる）。YouTubeは `LineSplitter`、Twitchは `JSONObjectSplitter` に、**先頭の読み込み済みのバイトも含めて**全チャンクを渡す。1行／1要素ごとに、1行／1要素ぶんの処理全体（`Data` の生成、`JSONSerialization.jsonObject`、パーサー（辞書から値を取り出す `as?` を含む）、`ChatStoreBuilder.append`）を1つの `autoreleasepool { }` に入れる。`skipped` には、JSONとして読めない行と、パーサーが `nil` を返したもの（ティッカー・サブスク通知・負のオフセットなど）を数える。YouTubeの `unreadable` の判定のため、これとは別に「JSONとして読めた行の数」も数える。`isCancelled()` を256件ごと、およびチャンクを読むたびに確認して、真なら `ChatLoaderError.cancelled`。**`unreadable` を投げる条件（まとめ：Twitchは `JSONObjectSplitter.outcome` が `.arrayFound` 以外なら `unreadable`。空のデータ・BOMだけ・途中で切れた入力の `.undetermined` も含む）**（Issue #6「読み込めない形式のJSONは「チャットを読み込めませんでした」と表示」）：Twitchは、ルートがオブジェクトでない、`comments` が無い、`comments` の値が配列でない（`JSONObjectSplitter` が配列に入れなかった）。YouTubeは、JSONとして読めた行が0。この条件を満たさず対象のメッセージが0件のときは、空の `ChatStore`（画面は「メッセージがありません」）。`ChatModel` は `unreadable` を `.failed` にする。**ファイルが読めない（`nextChunk` が投げる）場合は、そのエラーを伝える**。
 
 テスト（`ChatLoaderTests.swift`）：
 1. `detectFormat`：先頭に `{"replayChatItemAction":…` → youTube、Twitch風 `{"FileInfo":…` → twitch。引用符込みのキー（22バイト）が4096バイトの範囲に完全に収まる位置（先頭4074バイトの空白の後に置く）→ youTube。1バイトでも範囲からはみ出す位置（先頭4075バイトの空白の後）→ twitch。BOM付きで同じ位置関係（BOM＋4074バイトの空白）→ youTube（PC版も先頭4096文字だけを見る。本テストは全てASCIIなので、バイトと文字の差は生じない）。
@@ -255,7 +256,7 @@ public enum PickedFileKind: Equatable, Sendable { case video, chat, emojiLibrary
 - `.fileImporter(isPresented:allowedContentTypes: [.item], allowsMultipleSelection: true)` に変える。結果は `app.handlePicked(urls: [URL])`。失敗は従来どおり `diagnostics.reportError`。
 - `AppModel`：`let chat: ChatModel`、`let emoji: EmojiStore`、`private(set) var notices: [String]`（待ち行列。下の「通知の表示」）、`var alertMessage: String? { playback.openError ?? notices.first }`、`func dismissAlert()`。`PlayerScreen` の `.alert` は `alertMessage` を使う（見出しは「確認してください」に変える。M1の「動画を開けませんでした」は、`openError` の中身が理由を含むので見出しを一般化する）。
 - `handlePicked(urls:)`：
-  1. 各URLを `PickedFileKind.classify`。`unsupported` が含まれていたら `notices.append("対応していない形式です")`（拡張子）を出す（他のファイルは処理を続ける）。
+  1. 各URLを `PickedFileKind.classify`。`unsupported` が含まれていたら `notices.append("対応していない形式です")` を出す（他のファイルは処理を続ける）。
   2. `video` が1つ以上あれば、**最初の1つ**だけを `playback.open(url:)`（複数あれば、残りは無視してログに書く。プレイリストはM3）。`playback.open` は同期で完了する（`await` を挟まない。`PlayerModel.swift` の `open(url:)`）ので、呼ぶ前後の `openCount` を比べる。増えたら（成功）`chat.reset()`。失敗したら、**この回のチャットの読み込みは行わない**（`openError` が出る）。差し替えの失敗で古い動画が外れた場合（`playback.title == nil` になる）は、チャット欄も消えるので `chat.reset()` も呼ぶ。
   3. `chat`（`.json`）が1つ以上あれば、**最初の1つ**を読み込む。動画が開いていない（`playback.title == nil`）なら、`notices.append("先に動画を開いてください")` を出して読み込まない。
   4. `emojiLibrary`（`.sqlite`）が1つ以上あれば、最初の1つを `emoji.importLibrary(from:)`（`EmojiStore` のメソッド。内部で `EmojiLibrary`（`EmojiStore` が生成して持つ actor）の `importLibrary` を `await` し、成功したら自分の `libraryChanged()`・`hasLibrary`・`libraryCount` を更新する。`Task` で。失敗は `notices.append("絵文字ライブラリを読み込めませんでした")`）。動画の有無には依存しない。
@@ -284,9 +285,10 @@ public enum PickedFileKind: Equatable, Sendable { case video, chat, emojiLibrary
 - ライブラリの有無と件数は、`MainActor` 側（`EmojiStore`）が `hasLibrary: Bool`・`libraryCount: Int?` として持つ。アプリ起動時に1回、`EmojiLibrary` に問い合わせて入れ（件数は `SELECT count(*)`）、取り込み成功時にも更新する。`lookup` は actor を同期では呼べないので、この `MainActor` 側のフラグで判定する。
 
 **`EmojiStore`（`@Observable @MainActor`）**：
-- `revision: Int`（読み込みが終わった絵文字が増えたときに、まとめて（100ms以内の分を1回で）増やす。行はこれを読んで再描画される）。
+- `revision: Int`（読み込みが終わった絵文字が増えたときに、まとめて（100ms以内の分を1回で）増やす。行はこれを読んで再描画される。まとめ方：完了のたびに「保留中」フラグを立て、立っていなければ100ms後に `revision += 1` して下ろす `Task` を1つ起動する）。
+- 公開するもの（EmojiStoreの一覧）：`revision`、`hasLibrary`、`libraryCount`、`lookup(url:)`、`importLibrary(from:)`（6.1）、`libraryChanged()`。
 - `enum Lookup { case image(UIImage), pending, missing }`、`func lookup(url: String) -> Lookup`（`View` の `body` から呼ばれる。`revision` 以外の保持物（`NSCache`・`missing`・`inFlight`・世代）はすべて `@ObservationIgnored` にして、描画中の状態変更で再描画がループしないようにする。読み込みの開始は `Task { }` に逃がす）：メモリのキャッシュ（`NSCache<NSString, UIImage>`、`countLimit = 1000`。`NSCache` は厳密なLRUではなくメモリ逼迫時にも捨てるが、Issueの「直近1000種類まで」の実用上の近似として許容し、コメントに書く）にあれば `.image`、「無い」の記録（`Set<String>`）にあれば `.missing`、ライブラリが無ければ `.missing`、どちらでもなければ読み込みを始めて（同じURLの読み込みは1回にまとめる＝`inFlight: Set<String>`）`.pending`。
-- 読み込み：`EmojiLibrary.imageData(for:)` → `UIImage(data:)` → 高さ18ptに描き直す。`Text(Image(uiImage:))` は `UIImage.size`（pt＝px÷scale）で描かれ、`preparingThumbnail(of:)` は拡大を保証しないので、`UIGraphicsImageRenderer`（`format.scale = 3`、iPhoneのみの前提でコメントに書く。サイズは高さ18pt、幅は縦横比から計算）で描き直したものを使う。デコードと描き直しは `EmojiStore` の `nonisolated` な非同期関数（`Task.detached(priority: .utility)`）で行い、結果の `UIImage` を `MainActor` でキャッシュへ入れる（Appは Swift 5 モードなので `Sendable` の警告は出ない）→ キャッシュへ。デコードできない／データが無い → 「無い」の記録。
+- 読み込み：`EmojiLibrary.imageData(for:)` → `UIImage(data:)` → 高さ18ptに描き直す。`Text(Image(uiImage:))` は `UIImage.size`（pt＝px÷scale）で描かれ、`preparingThumbnail(of:)` は拡大を保証しないので、`UIGraphicsImageRenderer`（`format.scale = 3`、iPhoneのみの前提でコメントに書く。サイズは高さ18pt、幅は縦横比から計算）で描き直したものを使う。デコードと描き直しは、`EmojiStore` の `nonisolated` な `static` 関数を `Task.detached(priority: .utility)` から呼んで行い、結果の `UIImage` を `MainActor` でキャッシュへ入れる（Appは Swift 5 モードなので `Sendable` の警告は出ない）→ キャッシュへ。デコードできない／データが無い → 「無い」の記録。
 - `libraryChanged()`：キャッシュと記録と `inFlight` を消し、`generation += 1`、`revision += 1`（取り込み後に呼ぶ）。読み込みを始めたときの `generation` を持っておき、完了時に違っていたら結果を捨てる（その完了は `inFlight` や記録には触れない。新しい世代の読み込みの印を消さないため。取り込み前に始めた読み込みの古い画像を、キャッシュに入れない）。
 - ログ：取り込み `絵文字ライブラリ取り込み 件数=… サイズ=…MB 所要=…s`、失敗 `絵文字ライブラリ取り込み失敗: …`。ライブラリに無かったURLの最初の20件を `絵文字なし url=…` でログに残す。
 
@@ -303,11 +305,12 @@ public enum PickedFileKind: Equatable, Sendable { case video, chat, emojiLibrary
   - `.loaded`：一覧。
 - 一覧：`ScrollViewReader { proxy in ScrollView { LazyVStack(spacing: 6) { ForEach(range, id: \.self) { ChatRowView(message: store.message(at: $0), emoji: app.emoji) } } } }`。`range = store.window(endIndex: chat.endIndex)`。切り替えにアニメーションは付けない（`.transaction { $0.animation = nil }`。確定事項6）。
 - **スクロール（Issue #6「過去を遡って見ているときは、スクロール位置を動かさない」）の方式は1つに決める**：
-  - 最下部の判定：`.onScrollGeometryChange(for: Bool.self)`（iOS 18。`geometry.visibleRect.maxY >= geometry.contentSize.height - 2` の符号付きの式で真偽を決める。**内容が表示領域より短いときは真になる**（絶対値の差にすると、読み込み直後の短い内容で偽になり凍結してしまう））。この式で `isAtBottom` を更新する。
+  - 最下部の判定（`geometry` から）：`.onScrollGeometryChange(for: Bool.self)`（iOS 18。`geometry.visibleRect.maxY >= geometry.contentSize.height - 2` の符号付きの式で真偽を決める。**内容が表示領域より短いときは真になる**（絶対値の差にすると、読み込み直後の短い内容で偽になり凍結してしまう））。この式で `isAtBottom` を更新する。
   - 表示する末尾 `shownEnd` は `@State`。`isAtBottom` が真の間は `chat.endIndex` に追従し、`range = store.window(endIndex: shownEnd)` が空でなければ、`shownEnd` が変わるたびに `proxy.scrollTo(range.upperBound − 1, anchor: .bottom)`（アニメーションなし）。範囲が空のときは呼ばない。
   - **利用者が上へ遡って `isAtBottom` が偽になったら、`shownEnd` を凍結する**（新着を足さない。先頭の行も消えないので、見ている行がずれない）。最下部へ戻ったら凍結を解いて `chat.endIndex` に追従し直す。
-  - ただし `chat.endIndex` が `shownEnd` より小さくなった（後ろへのシーク）か、200件以上大きくなった（前へ大きくシーク）ときは、凍結を解いて最下部へ戻す（古い履歴が現在の再生位置と食い違ったままになるのを避ける）。
-  - `isAtBottom` が、新着で内容が伸びた瞬間に偽へ書かれる競合を避けるため、`shownEnd` を更新した直後0.3秒は `isAtBottom` の偽への更新を無視する。
+  - ただし `chat.endIndex` が `shownEnd` より小さくなった（後ろへのシーク）か、**1回の更新（`onChange(of: chat.endIndex)` の `old` → `new`）で200件以上跳んだ**（前へ大きくシーク。凍結中の自然な新着の蓄積では解かない）ときは、凍結を解いて最下部へ戻す（古い履歴が現在の再生位置と食い違ったままになるのを避ける）。
+  - `isAtBottom` の**偽への更新は、スクロールの局面（`.onScrollPhaseChange`、iOS 18）が `.interacting`・`.decelerating` のとき（利用者の操作中）だけ受け付ける**。プログラムの `scrollTo` や新着で内容が伸びたことで偽に書かれるのを防ぐためで、時間窓は使わない。真への更新は常に受け付ける。`store` の同一性（`ObjectIdentifier`）が変わったら、`shownEnd` を `chat.endIndex` に作り直し、凍結も解く。
+  - 読み込みが完了した直後は、停止中でも1回だけ現在位置で `updatePosition` を呼ぶ（再生が終わって停止した後に読み込んでも、一覧が空のままにならないように）。
   - 退避先（U4）：行の高さが揃わず `scrollTo` が最下部に揃わないとき、`.defaultScrollAnchor(.bottom, for: .sizeChanges)` を試す。
 - **停止中の扱い（決定）**：`PlaybackClock.position(at:)` は停止中（`mode == .stopped`）に0を返す（`PlaybackClock.swift:120〜`）。動画が最後まで進んで停止したときにチャット欄が空に戻らないよう、**ループは回し続け、各周期で停止中なら `updatePosition` を呼ばずに飛ばす**（最後の表示を残す）。動画を開いた直後は `PlayerModel.open` が `clock.stop()` を呼ぶので、`.playing` が届くまでの間も停止中として飛ばされる。ループ自体を停止中に抜けてはいけない（`.task(id:)` の `id` は `scenePhase` だけなので、再開しなくなる）。`PlayerModel` に `var isClockStopped: Bool { clock.mode == .stopped }` を足す（`clock` は `private` かつ `@ObservationIgnored`。この値は監視されないので、ポーリングで毎回読む）。動画を開き直したときは `chat.reset()` で空になる。
 - 位置の更新：`.task(id: scenePhase)` で、`scenePhase != .background` の間、0.25秒ごとに `app.chat.updatePosition(seconds: Int(max(0, app.playback.displayPosition(at: ProcessInfo.processInfo.systemUptime)).rounded(.down)))`（M1の `ControlsView` のシークバーと同じ作り。背面では回さない）。
@@ -316,7 +319,7 @@ public enum PickedFileKind: Equatable, Sendable { case video, chat, emojiLibrary
 **`ChatRowView`**（`let message: ChatMessage`、`let emoji: EmojiStore`）：
 - 配色（Issue #6 の値）：オーナー＝文字 `#4CD97B`・背景 `#16301F`・太字（**投稿者名と本文の両方**。PC版 `MainWindow.xaml` と同じ）・左端のバー（文字色）、モデレーター＝文字 `#4DA3FF`・背景 `#16283A`・太字・左端のバー（文字色）、通常＝文字 `#F1F1F6`・背景 `#1C1C25`・バーなし（透明。PC版 `ChatViewModel.cs` も `Brushes.Transparent`）。角丸8、内側の余白は横10・縦8、左端のバーの幅3。色は `Color(red:green:blue:)` の定数にまとめる（`ChatStyle`）。
 - 上段：投稿者名（`.caption`、不透明度0.9）。下段：本文（`.callout`）。
-- **本文の組み立て**：`message.runs` を順に、`Text` を連結する。`.text(s)` は `ChatLinks.segments(in: s)` で分けて、`.text` は `Text(String)`、`.link` は `AttributedString`（`link` 属性＋下線）を `Text(attributed)` に。`.emoji(url, alt)` は、`emoji.lookup(url:)` が `.image(ui)` なら `Text(Image(uiImage: ui))`、`.pending` なら幅だけを確保する空白の `Text("　")`、`.missing` なら `Text(alt)`（薄い色）。`emoji.revision` を読んで、読み込み完了で再描画されるようにする。
+- **本文の組み立て**：`message.runs` を順に、`Text` を連結する（`+` は iOS 26 SDK で非推奨になった可能性があるので、`Text` の文字列補間 `Text("\(a)\(b)")` で組み立てる。補間できない場合や警告が出ない場合は `+` でもよい。CIの警告で確かめる）。`.text(s)` は `ChatLinks.segments(in: s)` で分けて、`.text` は `Text(String)`、`.link` は `AttributedString`（`link` 属性＋下線）を `Text(attributed)` に。`.emoji(url, alt)` は、`emoji.lookup(url:)` が `.image(ui)` なら `Text(Image(uiImage: ui))`、`.pending` なら幅だけを確保する空白の `Text("　")`、`.missing` なら `Text(alt)`（薄い色）。`emoji.revision` を読んで、読み込み完了で再描画されるようにする。
 - `.textSelection(.enabled)` を付ける。**リンクのタップが効かなくなる場合は、選択を外す**（U1。確定事項5）。リンクは `Link`/`AttributedString.link` の標準の動作で、既定のブラウザ（Safari）で開く。確認は挟まない。
 
 **`DiagnosticsView`**（シート）：行を足す：`チャット: <loadSummary または なし>`、`絵文字ライブラリ: あり／なし（<件数>）`。1行の要約は変えない。
@@ -352,7 +355,7 @@ public enum PickedFileKind: Equatable, Sendable { case video, chat, emojiLibrary
 | I（受け入れ3） | `.sqlite` を選ぶと取り込まれ、絵文字が画像で表示される。ライブラリに無い絵文字は代替テキスト（`:_x:`・エモート名・絵文字そのもの）。壊れた `.sqlite` は「絵文字ライブラリを読み込めませんでした」 | 画像の見た目（サイズ・解像度）、代替テキスト |
 | J（受け入れ2） | チャット本文のURLがリンクになり、タップでSafariが開く。末尾の句読点がURLに含まれない。長押しで選択・コピーができるか（できなければ、できない旨） | リンクが開かない場面 |
 | K（受け入れ5） | 163MB級のチャットを読み込む。読み込み中は「読み込み中」が出て、動画の再生が止まらない。読み込み時間とメモリ（診断シートのチャット行・ログ）。落ちない | 読み込み時間、メモリ（前→後・ピーク）、ログファイル |
-| L | 読み込み中に別の動画を開くと、チャットが外れ、古い読み込みの結果が反映されない。動画を開き直すとチャットが外れる。チャット単独（動画なし）を選ぶと「先に動画を開いてください」。未対応のファイル（`.txt`）と動画でない `.json` 以外を同時に選び、通知が2件積まれたとき、OKを押すと2件目が続けて出るか | 挙動 |
+| L | 読み込み中に別の動画を開くと、チャットが外れ、古い読み込みの結果が反映されない。動画を開き直すとチャットが外れる。チャット単独（動画なし）を選ぶと「先に動画を開いてください」。動画を開いていない状態で `.txt` と `.json` を同時に選ぶと、通知が2件（「対応していない形式です」「先に動画を開いてください」）積まれ、OKを押すと2件目が続けて出るか | 挙動 |
 
 ## 9. CI・品質管理
 
