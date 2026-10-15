@@ -13,6 +13,8 @@ final class RemoteControlController {
     var skip: @MainActor @Sendable (Int) -> Void
     /// 秒
     var seek: @MainActor @Sendable (Double) -> Void
+    var next: @MainActor @Sendable () -> Void
+    var previous: @MainActor @Sendable () -> Void
   }
 
   /// `AppModel` がアプリの生存期間中ずっと保持するので、`deinit` での `removeTarget` は書かない。
@@ -20,19 +22,24 @@ final class RemoteControlController {
 
   init(handlers: Handlers) {
     tokens = Self.install(handlers: handlers)
-    // 起動直後は、動画が無いので操作を無効にしておく（nextTrack などは常に無効）。
+    // 起動直後は、動画が無いので操作を無効にしておく。
     update(nil)
   }
 
-  /// `nil` なら表示を消し、再生系のコマンドを無効にする。
-  func update(_ state: NowPlayingState?) {
+  /// `nil` なら表示を消し、再生系と前へ・次へのコマンドを無効にする。
+  func update(_ state: NowPlayingState?, canGoPrevious: Bool = false, canGoNext: Bool = false) {
     let center = MPNowPlayingInfoCenter.default()
+    let commands = MPRemoteCommandCenter.shared()
     guard let state else {
       center.nowPlayingInfo = nil
       center.playbackState = .stopped
       setPlaybackCommands(enabled: false)
+      commands.previousTrackCommand.isEnabled = false
+      commands.nextTrackCommand.isEnabled = false
       return
     }
+    commands.previousTrackCommand.isEnabled = canGoPrevious
+    commands.nextTrackCommand.isEnabled = canGoNext
     var info: [String: Any] = [
       MPMediaItemPropertyTitle: state.title,
       MPNowPlayingInfoPropertyElapsedPlaybackTime: state.elapsedForSystem,
@@ -94,9 +101,11 @@ final class RemoteControlController {
       return { handlers.seek(position) }
     }
 
-    // 前の曲・次の曲・早送り・早戻しは使わない。
-    commands.nextTrackCommand.isEnabled = false
-    commands.previousTrackCommand.isEnabled = false
+    // 前へ・次への有効・無効は `update` が決める。10秒送り・戻しと両立しない端末では、
+    // 10秒送り・戻しを優先する（ユーザー確定）ので、`skipForward`／`skipBackward` は無効にしない。
+    add(commands.nextTrackCommand, name: "nextTrack") { _ in handlers.next }
+    add(commands.previousTrackCommand, name: "previousTrack") { _ in handlers.previous }
+    // 早送り・早戻しは使わない。
     commands.seekForwardCommand.isEnabled = false
     commands.seekBackwardCommand.isEnabled = false
     return tokens

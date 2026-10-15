@@ -45,6 +45,11 @@ struct DiagnosticsView: View {
           line("PiP", diagnostics.pipActive ? "表示中" : "なし")
           line("チャット", app.chat.loadSummary ?? "なし")
           line("絵文字ライブラリ", app.emoji.hasLibrary ? "あり（\(app.emoji.libraryCount ?? 0)件）" : "なし")
+          line(
+            "プレイリスト",
+            "\(app.playlist.playlist.entries.count)件 現在 "
+              + (app.playlist.playlist.currentIndex.map { "\($0 + 1)番目" } ?? "なし"))
+          line("再生位置の記憶", "\(app.resume.count)件")
           line("直近のエラー", diagnostics.lastError ?? "なし")
           line("バージョン", diagnostics.versionText)
         }

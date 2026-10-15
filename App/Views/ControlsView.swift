@@ -4,7 +4,12 @@ import VLCChatCore
 /// 再生・シーク・速度・PiP の操作パネル。
 struct ControlsView: View {
   let model: PlayerModel
+  let playlist: PlaylistModel
   let onPickFile: () -> Void
+  let onShowPlaylist: () -> Void
+  let onShowSettings: () -> Void
+  let onPrevious: () -> Void
+  let onNext: () -> Void
   @State private var isScrubbing = false
   @State private var scrubPosition = 0.0
   @State private var shownPosition = 0.0
@@ -13,7 +18,10 @@ struct ControlsView: View {
   var body: some View {
     VStack(spacing: 12) {
       seekBar
-      HStack(spacing: 28) {
+      HStack(spacing: 24) {
+        Button(action: onPrevious) { Image(systemName: "backward.end.fill").font(.title2) }
+          .disabled(!playlist.playlist.hasPrevious)
+          .accessibilityLabel("前の項目")
         Button { model.skip(seconds: -10) } label: { Image(systemName: "gobackward.10").font(.title) }
           .accessibilityLabel("10秒戻る")
         Button { model.togglePlayPause() } label: {
@@ -22,9 +30,14 @@ struct ControlsView: View {
         .accessibilityLabel(model.isPlaybackRequestedActive ? "一時停止" : "再生")
         Button { model.skip(seconds: 10) } label: { Image(systemName: "goforward.10").font(.title) }
           .accessibilityLabel("10秒進む")
+        Button(action: onNext) { Image(systemName: "forward.end.fill").font(.title2) }
+          .disabled(!playlist.playlist.hasNext)
+          .accessibilityLabel("次の項目")
       }
       HStack {
         Button("ファイルを選択", action: onPickFile)
+        Button(action: onShowPlaylist) { Image(systemName: "list.bullet") }
+          .accessibilityLabel("プレイリスト")
         Spacer()
         Menu {
           ForEach(PlaybackSpeed.steps, id: \.self) { speed in
@@ -36,6 +49,8 @@ struct ControlsView: View {
         .accessibilityLabel("再生速度 \(PlaybackSpeed.label(model.rate))")
         Button { model.startPiP() } label: { Image(systemName: "pip.enter") }
           .accessibilityLabel("ピクチャインピクチャ")
+        Button(action: onShowSettings) { Image(systemName: "gearshape") }
+          .accessibilityLabel("設定")
       }
       .buttonStyle(.bordered)
     }

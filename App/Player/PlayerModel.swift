@@ -25,6 +25,24 @@ final class PlayerModel {
 
   /// `AppModel` が後付けする（ロック画面の表示を更新するため）。
   @ObservationIgnored var remote: RemoteControlController?
+  /// 保存済みの再生位置を引く（`AppModel` が配線する）。
+  @ObservationIgnored var resumeLookup: ((VideoIdentity) -> TimeInterval?)?
+  @ObservationIgnored var positionRecorder: ((VideoIdentity, TimeInterval) -> Void)?
+  /// 最後まで再生した（`endReached`）。
+  @ObservationIgnored var onEnded: ((VideoIdentity?) -> Void)?
+  /// ロック画面の前へ・次への有効・無効。
+  @ObservationIgnored var navigationState: (() -> (canGoPrevious: Bool, canGoNext: Bool))?
+  /// 開いた動画の識別（名前＋サイズ）。サイズが取れなければ nil＝記憶しない。
+  @ObservationIgnored private var currentIdentity: VideoIdentity?
+  @ObservationIgnored private var savedPosition: TimeInterval?
+  /// 復元が済んだ（またはしないと決まった）。
+  @ObservationIgnored private var restoreCompleted = true
+  /// 最初の `.playing` になった時刻（systemUptime）。
+  @ObservationIgnored private var playingSince: TimeInterval?
+  /// `player.isSeekable` は読まない。内部値の更新とイベント配送の順が保証されないため、イベントの値を使う。
+  @ObservationIgnored private var isSeekable = false
+  @ObservationIgnored private var hasReachedEnd = false
+  @ObservationIgnored private var recordTask: Task<Void, Never>?
   @ObservationIgnored private var clock = PlaybackClock()
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
@@ -55,6 +73,14 @@ final class PlayerModel {
     diagnostics.playbackStateText = { [weak self] in
       self?.player.map { "状態=\($0.state)" } ?? "状態=-"
     }
+    // 再生中は5秒ごとに位置を記録する。
+    recordTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .seconds(5))
+        guard let self else { return }
+        if self.clock.mode == .playing { self.recordPosition() }
+      }
+    }
   }
 
   // MARK: - 開く
@@ -66,6 +92,8 @@ final class PlayerModel {
   func open(url: URL) {
     openError = nil
     guard let player else { return }
+    // 別の動画に替える前に、今の動画の位置を残す。
+    recordPosition()
     let file = ScopedFile(url: url)
     let sizeMB = file.fileSizeBytes.map { String(format: "%.1fMB", Double($0) / 1_048_576) } ?? "不明"
     AppLog.write("選択 \(url.path) startAccessing=\(file.didStartAccess) サイズ=\(sizeMB)")
@@ -87,13 +115,7 @@ final class PlayerModel {
       reportOpenError("再生開始に失敗: \(error)")
       // 差し替えに失敗しても古い動画は再生を続けるが、古い動画が外れた状態（.idle/.error）なら停止扱いにする。
       if player.state == .idle || player.state == .error {
-        clock.stop()
-        clock.setDuration(nil)
-        duration = nil
-        title = nil
-        currentFile = nil
-        syncClockState()
-        remote?.update(nil)
+        resetAfterDetach()
       }
       return
     }
@@ -106,9 +128,19 @@ final class PlayerModel {
     try? player.setPlaybackRate(PlaybackRate(Float(PlaybackSpeed.normal)))
     clock.setRate(PlaybackSpeed.normal, at: now)
     diagnostics.resetTimeStats()
+    // 記憶の状態を初期化する（`recordPosition()` を呼んだ後に `hasReachedEnd` を下ろす）。
+    currentIdentity = file.fileSizeBytes.map { VideoIdentity(fileName: url.lastPathComponent, size: Int64($0)) }
+    savedPosition = currentIdentity.flatMap { resumeLookup?($0) }
+    restoreCompleted = savedPosition == nil
+    playingSince = nil
+    isSeekable = false
+    hasReachedEnd = false
     // 再生中に差し替えたとき、状態が `.playing` のまま変わらず通知が来ない場合に備える。
     // 通知が来ても `clock.play(at:)` は冪等。
-    if player.state == .playing { clock.play(at: now) }
+    if player.state == .playing {
+      clock.play(at: now)
+      playingSince = now
+    }
     // 古いファイルのスコープは、新しい再生を始めてから解放する。
     currentFile = file
     // 前の動画での中断・経路の消失の後始末は、新しい動画には持ち越さない。
@@ -171,19 +203,90 @@ final class PlayerModel {
     updateRemote()
   }
 
-  func seek(toSeconds seconds: Double) {
-    guard let player, let duration, duration > 0 else { return }
+  /// `true` は「受け付けられた」であって「その位置に着地した」ではない。
+  @discardableResult
+  func seek(toSeconds seconds: Double) -> Bool {
+    guard let player, let duration, duration > 0 else { return false }
     diagnostics.resetTimeStats()
     do {
       try player.seek(to: PlaybackPosition(seconds / duration))
       AppLog.write("操作 seek \(String(format: "%.1f", seconds))s")
     } catch {
       AppLog.write("操作 seek 失敗: \(error)")
-      return
+      return false
     }
     clock.seek(to: seconds, at: now)
     syncClockState()
     updateRemote()
+    return true
+  }
+
+  // MARK: - 停止
+
+  /// 動画は残して停止する（M1の「終端で停止して先頭に戻る」状態）。
+  func stopKeepingTitle() {
+    recordPosition()
+    player?.stop()
+    clock.stop()
+    syncClockState()
+    updateRemote()
+  }
+
+  /// 動画を閉じる。チャット欄は `AppModel` 側で空にする。
+  func stop() {
+    recordPosition()
+    player?.stop()
+    resetAfterDetach()
+  }
+
+  /// ロック画面の前へ・次への有効・無効を更新する。
+  func refreshRemote() {
+    updateRemote()
+  }
+
+  private func resetAfterDetach() {
+    clock.stop()
+    clock.setDuration(nil)
+    duration = nil
+    title = nil
+    currentFile = nil
+    currentIdentity = nil
+    savedPosition = nil
+    restoreCompleted = true
+    syncClockState()
+    remote?.update(nil)
+  }
+
+  // MARK: - 再生位置の記憶
+
+  func recordPosition() {
+    guard let identity = currentIdentity, let positionRecorder else { return }
+    let at = now
+    let pending = ResumeRules.isResumePending(
+      secondsSincePlaying: playingSince.map { at - $0 }, restoreCompleted: restoreCompleted)
+    guard
+      ResumeRules.shouldRecord(
+        position: clock.position(at: at), isClockStopped: clock.mode == .stopped,
+        isResumePending: pending, hasReachedEnd: hasReachedEnd)
+    else { return }
+    positionRecorder(identity, clock.position(at: at))
+  }
+
+  /// 再生が始まり、長さが確定し、シークできるようになってから、絶対位置へシークする。
+  /// `:start-time` は使わない（タイムラインが切り詰められ、表示の位置・長さがずれる）。
+  private func tryRestore() {
+    guard !restoreCompleted, clock.mode == .playing, isSeekable, let duration, duration > 0,
+      let since = playingSince,
+      ResumeRules.isResumePending(secondsSincePlaying: now - since, restoreCompleted: false)
+    else { return }
+    guard let target = ResumeRules.startPosition(saved: savedPosition, duration: duration) else {
+      restoreCompleted = true
+      return
+    }
+    if seek(toSeconds: target) {
+      restoreCompleted = true
+      AppLog.write("記憶 復元 \(title ?? "-") \(String(format: "%.1f", target))s")
+    }
   }
 
   func setRate(_ speed: Double) {
@@ -292,6 +395,7 @@ final class PlayerModel {
     // ロック検知の通知はパスコード設定時にしか届かないので、前面復帰時の状態もここに残す。
     AppLog.write("画面 \(name) \(stateDescription) PiP可=\(pip?.isPossible ?? false)")
     diagnostics.scenePhaseName = name
+    if !isActive { recordPosition() }
     // 前面に戻ったときは、再生中なら画面を消さない状態に戻す。
     UIApplication.shared.isIdleTimerDisabled = isActive && player?.state == .playing
   }
@@ -309,7 +413,7 @@ final class PlayerModel {
     // 既定の events は .newest(64) で取りこぼし得るので、必要な種類だけを通す unbounded にする。
     let envelopes = player.eventEnvelopes(policy: .unbounded) { envelope in
       switch envelope.event {
-      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError: true
+      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError, .seekableChanged, .endReached: true
       default: false
       }
     }
@@ -340,10 +444,19 @@ final class PlayerModel {
       if clock.mode == .playing { diagnostics.recordTime(mediaSeconds: seconds) }
       // PiPの窓のスキップなど、アプリを通らない位置の跳びを、ロック画面に反映する。
       if jumped { updateRemote() }
+      tryRestore()
     case .lengthChanged(let length):
       clock.setDuration(Self.seconds(length))
       duration = clock.duration
       updateRemote()
+      tryRestore()
+    case .seekableChanged(let seekable):
+      isSeekable = seekable
+      tryRestore()
+    case .endReached:
+      hasReachedEnd = true
+      AppLog.write("再生 終了 \(title ?? "-")")
+      onEnded?(currentIdentity)
     case .voutChanged(let count):
       AppLog.write("voutChanged \(count)")
     case .encounteredError:
@@ -376,10 +489,14 @@ final class PlayerModel {
     switch state {
     case .playing:
       clock.play(at: now)
+      if playingSince == nil { playingSince = now }
+      hasReachedEnd = false
+      tryRestore()
       // 一時停止・シークからの復帰で空白がmaxに入らないようにする。
       diagnostics.resetTimeStats()
     case .paused:
       clock.pause(at: now)
+      recordPosition()
     case .stopped, .idle, .error:
       clock.stop()
     default:
@@ -415,7 +532,10 @@ final class PlayerModel {
   }
 
   private func updateRemote() {
-    remote?.update(NowPlayingState.make(title: title, clock: clock, at: now))
+    let navigation = navigationState?() ?? (canGoPrevious: false, canGoNext: false)
+    remote?.update(
+      NowPlayingState.make(title: title, clock: clock, at: now),
+      canGoPrevious: navigation.canGoPrevious, canGoNext: navigation.canGoNext)
   }
 
   private static func seconds(_ duration: Duration) -> Double {
