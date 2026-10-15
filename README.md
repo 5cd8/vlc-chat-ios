@@ -6,7 +6,7 @@
 - 用語：[CONTEXT.md](CONTEXT.md)
 - ブラウザ版（凍結）：[vlc-chat-pwa](https://github.com/5cd8/vlc-chat-pwa)
 
-状態：M0（実現性の確認）が済み、M1（再生の土台：再生・シーク・速度・PiP・ロック画面の操作・診断ログ）を実装中。
+状態：M0（実現性の確認）とM1（再生の土台）が済み、M2（チャットと絵文字：YouTube/Twitchのチャットの再生同期表示・URLのリンク・絵文字ライブラリ）を実装中。
 
 ## ビルド
 
