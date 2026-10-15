@@ -111,6 +111,9 @@ final class PlayerModel {
     if player.state == .playing { clock.play(at: now) }
     // 古いファイルのスコープは、新しい再生を始めてから解放する。
     currentFile = file
+    // 前の動画での中断・経路の消失の後始末は、新しい動画には持ち越さない。
+    needsAudioRestart = false
+    pausedByInterruption = false
     openCount += 1
     syncClockState()
     updateRemote()
@@ -327,7 +330,8 @@ final class PlayerModel {
       // 状態によらず時計に渡す。停止中は時計が無視し、一時停止中の通知は権威のある値として受け入れる。
       let jumped = clock.noteMediaTime(seconds, at: now)
       // 補間が先行する偏りを見るため、通常の規則の範囲の通知（跳びでも動き出しでもない）だけを集計する。
-      if !jumped { diagnostics.recordNoteDelta(clock.lastNoteDelta) }
+      // 一時停止中の通知の差は、一時停止が反映されるまでの遅れを表すので入れない。
+      if !jumped, clock.mode == .playing { diagnostics.recordNoteDelta(clock.lastNoteDelta) }
       // 間隔の集計には、再生中の通知だけを入れる。
       if clock.mode == .playing { diagnostics.recordTime(mediaSeconds: seconds) }
       // PiPの窓のスキップなど、アプリを通らない位置の跳びを、ロック画面に反映する。

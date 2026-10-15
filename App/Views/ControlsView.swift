@@ -76,9 +76,10 @@ struct ControlsView: View {
       .font(.caption.monospacedDigit())
       .foregroundStyle(.secondary)
     }
-    // 背面・PiP中は画面が見えないので回さない（再描画がPiP・背面の負荷を押し上げないように）。
+    // 背面では画面が見えないので回さない（再描画が背面の負荷を押し上げないように）。
+    // inactive（コントロールセンターなどを開いている間）は画面が見えるので回す。
     .task(id: scenePhase) {
-      guard scenePhase == .active else { return }
+      guard scenePhase != .background else { return }
       while !Task.isCancelled {
         if !isScrubbing {
           shownPosition = model.displayPosition(at: ProcessInfo.processInfo.systemUptime)

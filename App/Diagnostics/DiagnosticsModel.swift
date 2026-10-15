@@ -73,7 +73,8 @@ final class DiagnosticsModel {
     noteDeltaMax = max(noteDeltaMax ?? delta, delta)
   }
 
-  /// 場面（前面・PiP・背面）ごとの負荷を比べるための、20秒ごとのログ。
+  /// 場面（前面・PiP・背面）ごとの負荷を比べるための、20秒ごとのログ（恒久的に残す。
+  /// 背面で映像のデコードを止める改善の効果も、このログで確かめる）。
   /// CPUは直近の20秒間の平均で、1コア分を100%とする（複数コアを使うと100%を超える）。
   private func writeLoadLog() {
     let now = ProcessInfo.processInfo.systemUptime

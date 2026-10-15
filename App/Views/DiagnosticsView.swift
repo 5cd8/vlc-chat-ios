@@ -14,6 +14,7 @@ struct DiagnosticsView: View {
         .padding(.vertical, 6)
     }
     .accessibilityLabel("診断情報")
+    .accessibilityValue(summary)
     .sheet(isPresented: $showsSheet) { detail }
   }
 

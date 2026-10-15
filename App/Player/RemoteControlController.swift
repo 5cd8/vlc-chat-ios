@@ -58,7 +58,7 @@ final class RemoteControlController {
   }
 
   /// ハンドラが呼ばれるスレッドの保証が無いので、nonisolated の文脈でクロージャを作り、
-  /// `Task { @MainActor }` でメインアクターへ渡す（U7: スレッドはログに出す）。
+  /// `Task { @MainActor }` でメインアクターへ渡す（呼ばれるスレッドは、実機で確かめられるようログに出す）。
   private nonisolated static func install(handlers: Handlers) -> [(command: MPRemoteCommand, token: Any)] {
     let commands = MPRemoteCommandCenter.shared()
     var tokens: [(command: MPRemoteCommand, token: Any)] = []

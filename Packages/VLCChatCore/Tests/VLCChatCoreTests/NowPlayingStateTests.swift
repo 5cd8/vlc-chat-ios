@@ -44,6 +44,7 @@ struct NowPlayingStateTests {
     clock.setRate(1.5, at: 0)
     clock.setDuration(60)
     let made = try #require(NowPlayingState.make(title: "a", clock: clock, at: 0))
+    #expect(made.title == "a")
     #expect(made.rate == 1.5)
     #expect(made.duration == 60)
   }
