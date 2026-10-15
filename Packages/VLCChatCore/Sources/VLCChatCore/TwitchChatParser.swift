@@ -2,10 +2,30 @@ import Foundation
 
 /// TwitchDownloader形式の `comments[]` の1要素を `ChatMessage` にする。規則は PC版（`TwitchChatParser.cs`）と同じ。
 public enum TwitchChatParser {
+  private static let noticeKeywords = ["subscribed", "resubscribed", "is gifting", "gifted"]
+
   /// サブスクライブ通知（"X subscribed with Prime." など）は通常のコメントと構造では区別できないので、
-  /// 本文の文言で除く。PC版と同じ式なので、"I subscribed yesterday" のような通常の文も除かれる。
-  private static func isSubscriptionNotice(_ body: String) -> Bool {
-    body.range(of: #"^\S+\s+(?:subscribed|resubscribed|is gifting|gifted)\b"#, options: .regularExpression) != nil
+  /// 本文の文言で除く。PC版の式 `^\S+\s+(?:subscribed|resubscribed|is gifting|gifted)\b` と同じ判定なので、
+  /// "I subscribed yesterday" のような通常の文も除かれる。
+  ///
+  /// 正規表現を使わず手で判定する。`String.range(of:options: .regularExpression)` は呼ぶたびに
+  /// 正規表現のオブジェクトを作り、4.6万件の読み込みでメモリが約600MB増えた（M2実機）。
+  static func isSubscriptionNotice(_ body: String) -> Bool {
+    var index = body.startIndex
+    // `\S+`：先頭は空白でない語。その語は丸ごと使われる（後ろに `\s+` が要るため）。
+    guard index < body.endIndex, !body[index].isWhitespace else { return false }
+    while index < body.endIndex, !body[index].isWhitespace { index = body.index(after: index) }
+    // `\s+`
+    while index < body.endIndex, body[index].isWhitespace { index = body.index(after: index) }
+    let rest = body[index...]
+    for keyword in noticeKeywords where rest.hasPrefix(keyword) {
+      // `\b`：直後が語の文字でないこと。
+      if let after = rest.dropFirst(keyword.count).first, after.isLetter || after.isNumber || after == "_" {
+        continue
+      }
+      return true
+    }
+    return false
   }
 
   public static func parse(comment: [String: Any]) -> ChatMessage? {

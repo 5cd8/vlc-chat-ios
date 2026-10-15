@@ -85,6 +85,17 @@ struct TwitchChatParserTests {
     }
   }
 
+  @Test("キーワードの直後が語の文字なら通知ではない") func requiresWordBoundaryAfterKeyword() {
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "x subscribedlol")) != nil)
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "x gifted_sub")) != nil)
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "x  subscribed!")) == nil)
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "x is gifting")) == nil)
+    // "is gifting" の間の空白は1つだけ（元の式と同じ）。
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "x is  gifting")) != nil)
+    // 先頭の1語だけの文は、後ろに空白とキーワードが無いので通知ではない。
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "subscribed")) != nil)
+  }
+
   @Test("通常の文は除かない（先頭が1語＋空白＋subscribedでないもの）") func keepsOrdinaryText() {
     #expect(TwitchChatParser.parse(comment: twitchComment(body: "subscribed to the channel")) != nil)
     #expect(TwitchChatParser.parse(comment: twitchComment(body: "gifted subs are nice")) != nil)

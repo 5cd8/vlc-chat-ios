@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Observation
 import VLCChatCore
@@ -60,10 +61,15 @@ final class ChatModel {
       }
       let elapsed = Date().timeIntervalSince(started)
       let memoryAfter = MemoryProbe.physFootprintMB()
+      // 読み込み中の一時オブジェクトで膨らんだ空きページを、OSへ返す。返した後の値との差で、
+      // 増えた分が実際に保持されているのか、解放済みで空いているだけなのかが分かる。
+      malloc_zone_pressure_relief(nil, 0)
+      let memoryReleased = MemoryProbe.physFootprintMB()
       // ファイルのスコープは、読み終えるまで保つ。
       withExtendedLifetime(file) {}
       let memoryText = String(
-        format: "メモリ=%.0f→%.0fMB（ピーク%.0fMB）", memoryBefore ?? 0, memoryAfter ?? 0, max(peak, memoryAfter ?? 0))
+        format: "メモリ=%.0f→%.0fMB（ピーク%.0fMB、解放後%.0fMB）", memoryBefore ?? 0, memoryAfter ?? 0,
+        max(peak, memoryAfter ?? 0), memoryReleased ?? 0)
       await self?.finish(generation: gen, name: name, outcome: outcome, elapsed: elapsed, memoryText: memoryText)
     }
   }
