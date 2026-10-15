@@ -87,7 +87,7 @@ struct TwitchChatParserTests {
 
   @Test("通常の文は除かない（先頭が1語＋空白＋subscribedでないもの）") func keepsOrdinaryText() {
     #expect(TwitchChatParser.parse(comment: twitchComment(body: "subscribed to the channel")) != nil)
-    #expect(TwitchChatParser.parse(comment: twitchComment(body: "nice gifted")) != nil)
+    #expect(TwitchChatParser.parse(comment: twitchComment(body: "gifted subs are nice")) != nil)
   }
 
   @Test("PC版と同じく、先頭が1語＋subscribedの通常の文も除かれる") func matchesDesktopBehaviorForFalsePositive() {
