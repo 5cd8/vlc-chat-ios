@@ -43,6 +43,8 @@ struct DiagnosticsView: View {
           line("phys_footprint", diagnostics.footprintMB.map { String(format: "%.1f MB", $0) } ?? "—")
           line("timeChanged間隔", diagnostics.timeStats?.summaryText ?? "—")
           line("PiP", diagnostics.pipActive ? "表示中" : "なし")
+          line("チャット", app.chat.loadSummary ?? "なし")
+          line("絵文字ライブラリ", app.emoji.hasLibrary ? "あり（\(app.emoji.libraryCount ?? 0)件）" : "なし")
           line("直近のエラー", diagnostics.lastError ?? "なし")
           line("バージョン", diagnostics.versionText)
         }

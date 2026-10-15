@@ -201,6 +201,10 @@ final class PlayerModel {
     updateRemote()
   }
 
+  /// 時計が停止中か（動画を開いた直後から再生が始まるまで、再生が終わった後）。停止中の `displayPosition` は0を返す。
+  /// `clock` は監視されないので、この値を読むときはポーリングで毎回読む。
+  var isClockStopped: Bool { clock.mode == .stopped }
+
   /// 補間した現在位置。UIの `TimelineView` が呼ぶ。
   func displayPosition(at uptime: TimeInterval) -> Double {
     clock.position(at: uptime)

@@ -14,29 +14,31 @@ struct PlayerScreen: View {
       video(model)
       if model.title != nil {
         ControlsView(model: model) { showsFileImporter = true }
+        ChatPanelView(app: app)
+      } else {
+        Spacer(minLength: 0)
       }
-      // M2でチャット欄が入る場所。
-      Spacer(minLength: 0)
       DiagnosticsView(app: app)
     }
-    .fileImporter(isPresented: $showsFileImporter, allowedContentTypes: [.item]) { result in
+    .fileImporter(isPresented: $showsFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
       switch result {
-      case .success(let url):
-        model.open(url: url)
+      case .success(let urls):
+        app.handlePicked(urls: urls)
       case .failure(let error):
         app.diagnostics.reportError("ファイル選択に失敗: \(error)")
       }
     }
     .alert(
-      "動画を開けませんでした",
+      "確認してください",
       isPresented: Binding(
-        get: { model.openError != nil },
-        set: { if !$0 { model.dismissOpenError() } }
+        get: { app.alertMessage != nil },
+        // 消す処理はここ1か所だけにする。ボタンの処理でも消すと、1回の操作で通知が2件消える。
+        set: { if !$0 { app.dismissAlert() } }
       )
     ) {
-      Button("OK") { model.dismissOpenError() }
+      Button("OK") {}
     } message: {
-      Text(model.openError ?? "")
+      Text(app.alertMessage ?? "")
     }
     .onChange(of: pip.map { ObjectIdentifier($0) }) { model.attachPiP(pip) }
     .onChange(of: scenePhase) { model.sceneDidChange(isActive: scenePhase == .active, name: "\(scenePhase)") }
