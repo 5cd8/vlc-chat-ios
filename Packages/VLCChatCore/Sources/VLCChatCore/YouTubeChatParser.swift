@@ -69,13 +69,12 @@ public enum YouTubeChatParser {
       guard let renderer = badge["liveChatAuthorBadgeRenderer"] as? [String: Any] else { continue }
       let iconType = (renderer["icon"] as? [String: Any])?["iconType"] as? String
       let tooltip = renderer["tooltip"] as? String
-      if iconType?.caseInsensitiveCompare("OWNER") == .orderedSame
-        || tooltip?.range(of: "Owner", options: .caseInsensitive) != nil
-      {
+      // 大文字小文字を区別しない比較。Foundation の `range(of:options:)` は呼ぶたびに NSString を作るので使わない。
+      let icon = iconType?.lowercased()
+      let tip = tooltip?.lowercased()
+      if icon == "owner" || tip?.contains("owner") == true {
         isOwner = true
-      } else if iconType?.caseInsensitiveCompare("MODERATOR") == .orderedSame
-        || tooltip?.range(of: "Moderator", options: .caseInsensitive) != nil
-      {
+      } else if icon == "moderator" || tip?.contains("moderator") == true {
         isModerator = true
       }
     }

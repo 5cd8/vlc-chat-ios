@@ -41,6 +41,18 @@ public final class ChatStore: Sendable {
 
   public var count: Int { times.count }
 
+  /// 格納に使っている領域のおおよその大きさ（バイト）。実機でメモリの増加分と比べるための診断用。
+  public var approximateByteCount: Int {
+    var total = times.capacity * 4 + authorIDs.capacity * 4 + roles.capacity + runStarts.capacity * 4
+    total += runCounts.capacity * 2 + runKinds.capacity + runA.capacity * 4 + runB.capacity * 4
+    total += textArena.capacity + (order?.capacity ?? 0) * 4
+    for string in strings { total += string.utf8.count + 32 }
+    return total
+  }
+
+  /// 診断用。文字列表（投稿者名・URL・代替テキスト）の種類数。
+  public var uniqueStringCount: Int { strings.count }
+
   /// テスト用。文字列表（投稿者名・URL・代替テキスト）の件数。
   var stringTableCount: Int { strings.count }
   /// テスト用。並べ替えの表を持たない（追加順がすでに昇順）か。

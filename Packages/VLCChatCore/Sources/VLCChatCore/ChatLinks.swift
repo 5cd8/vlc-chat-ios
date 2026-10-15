@@ -6,35 +6,52 @@ public enum ChatTextSegment: Equatable, Sendable {
 }
 
 /// 本文中のURLをリンクにする。規則は PC版（`ChatBodyBehavior.cs`）と同じ。
+///
+/// `https?://\S+` の正規表現は、呼ぶたびにオブジェクトを作ってメモリが増えた（行の描画のたびに呼ばれる）
+/// ので、使わず手で探す。
 public enum ChatLinks {
   /// 末尾から外す句読点。`)` を1文字ずつ外すだけの簡易な規則で、`a_(b)` の `)` も外れる（PC版と同じ）。
   private static let trailingPunctuation: Set<Character> = [".", ",", ";", ":", "!", "?", ")"]
+  private static let prefixes = ["https://", "http://"]
 
   public static func segments(in text: String) -> [ChatTextSegment] {
-    guard let regex = try? NSRegularExpression(pattern: #"https?://\S+"#) else { return text.isEmpty ? [] : [.text(text)] }
-    let nsText = text as NSString
     var result: [ChatTextSegment] = []
     var pending = ""
-    var consumed = 0  // ここまでを処理済み（UTF-16の位置）
+    var consumed = text.startIndex  // ここまでを処理済み
+    var index = text.startIndex
     func flush() {
       if !pending.isEmpty {
         result.append(.text(pending))
         pending = ""
       }
     }
-    for match in regex.matches(in: text, range: NSRange(location: 0, length: nsText.length)) {
-      var candidate = nsText.substring(with: match.range)
+    while index < text.endIndex {
+      let rest = text[index...]
+      guard let prefix = prefixes.first(where: { rest.hasPrefix($0) }) else {
+        index = text.index(after: index)
+        continue
+      }
+      // `\S+`：空白でない文字が続く限り。`http://` の後ろに1文字も無ければ一致しない。
+      var end = text.index(index, offsetBy: prefix.count)
+      guard end < text.endIndex, !text[end].isWhitespace else {
+        index = text.index(after: index)
+        continue
+      }
+      while end < text.endIndex, !text[end].isWhitespace { end = text.index(after: end) }
+      var candidate = String(text[index..<end])
       while let last = candidate.last, trailingPunctuation.contains(last) {
         candidate.removeLast()
       }
       // リンクにならないときは、`consumed` を進めず、通常のテキストのまま残す。
-      guard !candidate.isEmpty, let url = URL(string: candidate), let host = url.host, !host.isEmpty else { continue }
-      pending += nsText.substring(with: NSRange(location: consumed, length: match.range.location - consumed))
-      flush()
-      result.append(.link(label: candidate, url: url))
-      consumed = match.range.location + (candidate as NSString).length
+      if !candidate.isEmpty, let url = URL(string: candidate), let host = url.host, !host.isEmpty {
+        pending += text[consumed..<index]
+        flush()
+        result.append(.link(label: candidate, url: url))
+        consumed = text.index(index, offsetBy: candidate.count)
+      }
+      index = end
     }
-    pending += nsText.substring(from: consumed)
+    pending += text[consumed...]
     flush()
     return result
   }

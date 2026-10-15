@@ -51,8 +51,12 @@ final class ChatModel {
         let result = try ChatLoader.load(
           from: source,
           isCancelled: { Task.isCancelled },
-          progress: { _ in
-            if let current = MemoryProbe.physFootprintMB() { peak = max(peak, current) }
+          progress: { count in
+            if let current = MemoryProbe.physFootprintMB() {
+              peak = max(peak, current)
+              // 増え方（件数に比例するか）を見るための途中経過。
+              AppLog.write(String(format: "チャット読み込み 途中 件数=%d メモリ=%.0fMB", count, current))
+            }
           }
         )
         outcome = .success(result)
@@ -60,6 +64,12 @@ final class ChatModel {
         outcome = .failure(error)
       }
       let elapsed = Date().timeIntervalSince(started)
+      var storeText = ""
+      if case .success(let result) = outcome {
+        storeText = String(
+          format: " ストア≈%.1fMB（文字列%d種）", Double(result.store.approximateByteCount) / 1_048_576,
+          result.store.uniqueStringCount)
+      }
       let memoryAfter = MemoryProbe.physFootprintMB()
       // 読み込み中の一時オブジェクトで膨らんだ空きページを、OSへ返す。返した後の値との差で、
       // 増えた分が実際に保持されているのか、解放済みで空いているだけなのかが分かる。
@@ -69,7 +79,7 @@ final class ChatModel {
       withExtendedLifetime(file) {}
       let memoryText = String(
         format: "メモリ=%.0f→%.0fMB（ピーク%.0fMB、解放後%.0fMB）", memoryBefore ?? 0, memoryAfter ?? 0,
-        max(peak, memoryAfter ?? 0), memoryReleased ?? 0)
+        max(peak, memoryAfter ?? 0), memoryReleased ?? 0) + storeText
       await self?.finish(generation: gen, name: name, outcome: outcome, elapsed: elapsed, memoryText: memoryText)
     }
   }
