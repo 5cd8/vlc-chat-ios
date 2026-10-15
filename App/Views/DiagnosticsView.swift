@@ -21,7 +21,8 @@ struct DiagnosticsView: View {
     let state = app.playback.player.map { "\($0.state)" } ?? "-"
     let memory = app.diagnostics.footprintMB.map { String(format: "%.0fMB", $0) } ?? "—"
     let pip = app.diagnostics.pipActive ? " ・ PiP" : ""
-    return "状態 \(state) ・ \(memory)\(pip)"
+    let error = app.diagnostics.lastError == nil ? "" : " ・ エラー"
+    return "状態 \(state) ・ \(memory)\(pip)\(error)"
   }
 
   private var detail: some View {

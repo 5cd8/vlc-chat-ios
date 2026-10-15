@@ -8,6 +8,7 @@ struct ControlsView: View {
   @State private var isScrubbing = false
   @State private var scrubPosition = 0.0
   @State private var shownPosition = 0.0
+  @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
     VStack(spacing: 12) {
@@ -75,7 +76,9 @@ struct ControlsView: View {
       .font(.caption.monospacedDigit())
       .foregroundStyle(.secondary)
     }
-    .task {
+    // 背面・PiP中は画面が見えないので回さない（再描画がPiP・背面の負荷を押し上げないように）。
+    .task(id: scenePhase) {
+      guard scenePhase == .active else { return }
       while !Task.isCancelled {
         if !isScrubbing {
           shownPosition = model.displayPosition(at: ProcessInfo.processInfo.systemUptime)

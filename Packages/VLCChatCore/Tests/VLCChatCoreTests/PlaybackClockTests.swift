@@ -1,7 +1,7 @@
 import Testing
 @testable import VLCChatCore
 
-/// 期待値は5.1節の規則から手計算したもの。値はすべて2進で正確に表せる（`==` で比べてよい）。
+/// 期待値は規則から手計算したもの。`==` で比べる値は、同じリテラルを比べるか、2進で正確に表せる和になるようにしてある。
 /// 特に断らない限り、各テストは `play(at: 0)` を呼んだ状態から始める（停止中は時刻通知を無視するため）。
 struct PlaybackClockTests {
   private func playingClock() -> PlaybackClock {
@@ -50,6 +50,22 @@ struct PlaybackClockTests {
     clock.pause(at: 2)
     clock.noteMediaTime(12.3, at: 3)
     #expect(clock.position(at: 9) == 12.3)
+  }
+
+  @Test("一時停止中の小さな後退も受け入れる") func acceptsSmallBackwardNoteWhilePaused() {
+    var clock = playingClock()
+    clock.noteMediaTime(10, at: 0)
+    clock.pause(at: 2)  // 補間で12まで進んだ位置で止まる
+    clock.noteMediaTime(11.8, at: 3)  // libVLC の実際の停止位置。後退0.2は、再生中なら無視される範囲
+    #expect(clock.position(at: 9) == 11.8)
+  }
+
+  @Test("シークの着地でもlastNoteDeltaが更新される") func updatesLastNoteDeltaOnSeekLanding() {
+    var clock = playingClock()
+    clock.noteMediaTime(10, at: 0)
+    clock.seek(to: 100, at: 1)
+    clock.noteMediaTime(100.25, at: 1.25)
+    #expect(clock.lastNoteDelta == 0.25)  // 受け入れ前の位置はシーク先の100
   }
 
   @Test("前方へのずれは受け入れる") func acceptsForwardDrift() {

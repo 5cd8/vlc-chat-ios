@@ -13,8 +13,6 @@ final class PlayerModel {
   private(set) var setupError: String?
   private(set) var libVLCVersion: String?
   private(set) var title: String?
-  /// 診断表示用。ボタンは `isPlaybackRequestedActive`、補間は `clock` を直接使う。
-  private(set) var mode: PlaybackClock.Mode = .stopped
   private(set) var rate: Double = PlaybackSpeed.normal
   private(set) var duration: TimeInterval?
   private(set) var openError: String?
@@ -151,6 +149,8 @@ final class PlayerModel {
   }
 
   func pause() {
+    // ユーザーが一時停止したので、中断明けに自動で再開しない。
+    pausedByInterruption = false
     guard let player, player.isPlaybackRequestedActive else { return }
     AppLog.write("操作 pause")
     player.pause()
@@ -243,12 +243,13 @@ final class PlayerModel {
 
   func attachPiP(_ controller: PiPController?) {
     pipTask?.cancel()
+    possibleTask?.cancel()
     pip = controller
     diagnostics.pipActive = controller?.isActive ?? false
     guard let controller else { return }
     AppLog.write("PiPController 取得 isPossible=\(controller.isPossible)")
-    // 動画を開き直すまでPiPが使えなくなる現象の切り分け用。可否が変わった時刻を残す。
-    possibleTask?.cancel()
+    // 暫定: 動画を開き直すまでPiPが使えなくなる現象（自動PiPが起動しない）の切り分け用。
+    // 可否が変わった時刻を残す。原因が分かったら、配線ごと消す。
     possibleTask = Task { [weak self, weak controller] in
       var last = controller?.isPossible
       while !Task.isCancelled {
@@ -325,7 +326,8 @@ final class PlayerModel {
       let seconds = Self.seconds(time)
       // 状態によらず時計に渡す。停止中は時計が無視し、一時停止中の通知は権威のある値として受け入れる。
       let jumped = clock.noteMediaTime(seconds, at: now)
-      diagnostics.recordNoteDelta(clock.lastNoteDelta)
+      // 補間が先行する偏りを見るため、通常の規則の範囲の通知（跳びでも動き出しでもない）だけを集計する。
+      if !jumped { diagnostics.recordNoteDelta(clock.lastNoteDelta) }
       // 間隔の集計には、再生中の通知だけを入れる。
       if clock.mode == .playing { diagnostics.recordTime(mediaSeconds: seconds) }
       // PiPの窓のスキップなど、アプリを通らない位置の跳びを、ロック画面に反映する。
@@ -401,7 +403,6 @@ final class PlayerModel {
   private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
   private func syncClockState() {
-    mode = clock.mode
     rate = clock.rate
   }
 

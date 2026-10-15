@@ -38,6 +38,16 @@ struct NowPlayingStateTests {
     #expect(made.rateForSystem == 1)
   }
 
+  @Test("makeは選んだ速度と長さを引き継ぐ") func makeCarriesRateAndDuration() throws {
+    var clock = PlaybackClock()
+    clock.play(at: 0)
+    clock.setRate(1.5, at: 0)
+    clock.setDuration(60)
+    let made = try #require(NowPlayingState.make(title: "a", clock: clock, at: 0))
+    #expect(made.rate == 1.5)
+    #expect(made.duration == 60)
+  }
+
   @Test("一時停止後のmakeは止まった位置と速度0") func makeWhilePaused() throws {
     var clock = PlaybackClock()
     clock.play(at: 0)
