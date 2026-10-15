@@ -420,6 +420,27 @@ public struct SettingsStore {
 13. **追加の実機観点**：チェックCに「数GB〜30GB台の動画を、コピーせず再起動後に開き直せるか」を入れる。U2に「`lengthChanged` の時点で時計は停止中のため、最初に0秒が一瞬表示されてから跳ぶ可能性」を入れる。U4に「PiPの窓の前へ・次への扱い」を入れる。
 14. **ロック画面の前へ・次へと10秒送り・戻しが両立しない場合（R8）**：実機で両立しなければ、ユーザーに選んでもらう（要件の判断）。計画は両方を有効にして出す。
 
+### 6.8 補足2（独立レビュー2の反映。6.1〜6.7と食い違う場合は**本節が最優先**）
+
+1. **復元待ちを必ず解く（S1・M2）**：`pendingResume`／`resumeTarget` を「記録しない」条件にするのは、**再生開始（最初の `.playing`）から5秒まで**とし、それを過ぎたら無条件で解除して記録を始める（Core: `ResumeRules.shouldRecord(position:isClockStopped:isResumePending:)` の `isResumePending` を、`PlayerModel` が「`.playing` になってから5秒未満かつ復元が未完了」で渡す。5秒は `ResumeRules.pendingTimeout` の定数でテストする）。復元のシークは、`lengthChanged` で1回、失敗したら次の `timeChanged`（`.playing` 中）で1回だけ再試行する。`duration` が nil／0 のときは、`startPosition` が nil を返す（`duration == nil` → nil。5.6のテスト4を「長さ不明なら nil」に直す）ので、復元しない。`startPosition` は `saved > duration` でも nil（例: 長さ1000、保存1200 → nil。テスト追加）。
+2. **終端後の再生し直し（R1）**：6.7-2の「`currentIdentity = nil`」は取りやめ、**`private var hasReachedEnd` フラグ**で記録を止める（`recordPosition()` は立っている間は何もしない）。フラグは次の `.playing` への遷移か、`open` で下ろす。
+3. **`playItem` の手順（R2・M4）**：1つに統合する。①`playback.recordPosition()` ②動画を `PlaylistModel.resolve` で解決し `isVideoPlayable` を確認（落ちたら、`byUser` なら通知「開けませんでした: 名前」・`validity` 更新。何も変えず終了）③`playback.open(url:)` ④`openCount` が増えたら成功。失敗なら現在の項目は変えず終了（M2の `if opened || playback.title == nil { chat.reset() }` と同じく、**`playback.title == nil`（古い動画も外れた）のときは `chat.reset()` する**）⑤`setCurrent(id:)` ⑥`chat.reset()` ⑦チャットを解決して `chat.load`（失敗は通知）⑧`playback.refreshRemote()`。**置き換え（`handlePicked`）**では、`replace` は**先頭の項目の再生が成功してから**確定する（`PlaylistModel` の置き換えは、再生が成功しなければ元のプレイリストに戻す＝`replace` 前のスナップショットを保持して戻す。先頭が開けなければ、次の有効な項目を `nextStep` で探して再生する。全部だめなら元に戻して通知）。
+4. **「停止」の場合分け（R3）**：(a)自動進行がオフ、または末尾で終わった、(b)自動進行・次へ・前へで有効な項目が無い → **M1の「停止して先頭に戻る」状態のまま**（`title` は残す。`stop()` は呼ばない）。通知は(b)だけ「再生できる項目がありません」。6.7-6の「`playback.stop()`」は取り消す。(c)現在の項目を削除して次が無い／全部無効 → `PlayerModel.stop()` で動画を閉じる（`title == nil`。プレイリストに無い動画を再生し続けないため）。
+5. **歯車ボタン（R4）**：Issue の「画面の入口」は、プレイリストが空のとき「ファイルを選択」だけとしている。しかし設定シートに入る手段が空のときに無くなる（絵文字の入れ替えが M2 の「ファイルを選択」経路だけになる）。**計画は、歯車を常に出す案にしてあり、Issue と異なる。ユーザーが違うと言えば、空のときは出さない**（実装は `playlist.entries.isEmpty` の1条件）。
+6. **選択の振り分けをCoreへ（R5）**：`SelectionPlanner.plan(fileNames: [String]) -> SelectionPlan`（`videos: [Int]`（入力の添字を自然順に並べたもの）、`pairs: [Int?]`（`videos` と同じ並びのチャットの添字）、`ignoredChats: [Int]`、`soleChatIndex: Int?`（動画が無くチャットが1つ以上のときの先頭）、`unsupported: [Int]`、`sqlite: Int?`（最初の1つ））を `PickedFileKind`・`NaturalOrder`・`VideoChatPairing` で組み立てて返す。ファイル名の配列だけで決まり、`AppModel` はこの結果でURLを引くだけにする。テスト（`SelectionPlannerTests.swift`）：動画3＋チャット3の混在（入力順が崩れていても自然順）、動画0＋チャット2（`soleChatIndex` が先頭、`ignoredChats` に残り）、動画1＋チャット1（名前によらず対応）、sqlite 2つ（最初だけ）、未対応拡張子、空配列。
+7. **現在の項目の削除後の有効性確認（R7）**：`remove(at:)` が `.current` を返したら、`AppModel` は新しい現在の項目（元の次）自身の `isVideoPlayable` を先に確かめる。有効ならそれを再生。無効なら `validity` を更新し、飛ばした通知の対象に加えて、`nextStep` で探す。
+8. **実機チェックE（R6）**：画面が見えない状態（ロック中・背面・PiP表示中）で、自動進行と、ロック画面の「次へ」が動くか（動画の差し替え、チャットの読み込み、ロック画面の表示の更新）を足す。
+9. **軽微の反映**：
+   - タグ名は `v1.1.0-beta.14`（`https://raw.githubusercontent.com/harflabs/SwiftVLC/v1.1.0-beta.14/LICENSE`。`v` が必要）。6.7-12の記述を直す。
+   - 6.7-3の「シートが成功するか」は「シークが成功するか」。6.5の `PlayerScreen` の `importPurpose` は不要（`PlaylistView` の `ImportPurpose` だけを使う）。5.4・5.5・6.4の `videoSize` は、すべて削除して実装する。5.6のテスト5は `shouldRecord(position:isClockStopped:isResumePending:)` の3条件を1つずつ崩す形に直す。
+   - `AppModel.playlist`（`PlaylistModel`）に、`nextStep(...)`／`previousStep(...)` を包む関数を足す（`playlist.playlist.nextStep` と書かない）。`resolve` は `struct ResolvedFile { let url: URL; let wasStale: Bool }` を返す。
+   - `NavigationRelay` は `@MainActor final class`（`weak var model: AppModel?`）。
+   - `.broken.json` への改名は、名前に日時を付ける（`playlist.broken-<yyyyMMddHHmmss>.json`）。既存を上書きしない。
+   - 診断シートを開いている間は、`PlayerScreen` の `.alert` が出せないので、通知は閉じるまで待たせる（M2と同じ。許容）。
+   - チャット割り当て後の `chat.load` は、`playback.title != nil` かつ現在の項目のときだけ。
+   - `Playlist.setCurrent(id:)` は、存在しない `id` なら**無視する**（現在を変えない）。テストを足す。`ResumeStore.Entry.updatedAt` は、将来の整理用にだけ持つ（使わないなら削除してよい。実装者の判断）。
+   - プレイリストの現在の項目の「再生中のアイコン」は、`playback.title != nil` のときだけ出す（起動直後は、ハイライトだけ）。
+
 ## 7. 設計判断の記録（採用案・理由・採らなかった案）
 
 | # | 判断 | 理由 | 採らなかった案 |
