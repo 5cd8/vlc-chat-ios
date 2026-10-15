@@ -27,8 +27,8 @@ public struct ResumeStore: Codable, Equatable, Sendable {
     records[identity] = nil
   }
 
-  // 保存は fileName・size・position・updatedAt の配列。辞書のキーが構造体だと JSON の形が
-  // 「キーと値が交互の配列」になるので、配列で持つ。
+  // 保存は `{"entries":[{"identity":{"fileName","size"},"position","updatedAt"}]}`。
+  // 辞書のキーが構造体だと JSON の形が「キーと値が交互の配列」になるので、配列で持つ。
   private enum CodingKeys: String, CodingKey { case entries }
 
   public init(from decoder: Decoder) throws {

@@ -114,7 +114,10 @@ struct PlaylistView: View {
       .accessibilityValue(entry.chatFileName ?? "なし")
     }
     .contentShape(Rectangle())
-    .onTapGesture { app.playItem(at: app.playlist.playlist.entries.firstIndex { $0.id == entry.id } ?? 0, byUser: true) }
+    .onTapGesture {
+      guard let index = app.playlist.playlist.entries.firstIndex(where: { $0.id == entry.id }) else { return }
+      app.playItem(at: index, byUser: true)
+    }
     .listRowBackground(isCurrent ? Color.accentColor.opacity(0.15) : nil)
   }
 

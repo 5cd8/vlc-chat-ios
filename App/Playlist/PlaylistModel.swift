@@ -115,6 +115,10 @@ final class PlaylistModel {
     validity[id, default: EntryValidity(video: false, chat: nil)].video = false
   }
 
+  func markVideoPlayable(_ id: UUID) {
+    validity[id, default: EntryValidity(video: true, chat: nil)].video = true
+  }
+
   func markChatUnplayable(_ id: UUID) {
     validity[id, default: EntryValidity(video: true, chat: false)].chat = false
   }

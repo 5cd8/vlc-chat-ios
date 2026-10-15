@@ -194,7 +194,9 @@ final class AppModel {
       notices.append("先に動画を開いてください")
       return
     }
-    if let id = playlist.playlist.currentID { _ = playlist.assignChat(entryID: id, url: url) }
+    if let id = playlist.playlist.currentID, !playlist.assignChat(entryID: id, url: url) {
+      notices.append("チャットを開けませんでした: \(url.lastPathComponent)")
+    }
     AppLog.write("選択 チャット \(url.path)")
     chat.load(url: url)
   }
@@ -230,6 +232,7 @@ final class AppModel {
       return false
     }
     playlist.setCurrent(id: entry.id)
+    playlist.markVideoPlayable(entry.id)
     chat.reset()
     if let data = entry.chatBookmark {
       if let chatFile = playlist.resolve(data) {
@@ -296,8 +299,15 @@ final class AppModel {
   }
 
   private func followRemovedCurrent() {
-    // 起動直後・停止中は、現在を付け替えるだけで音は出さない。
-    guard playback.title != nil, !playback.isClockStopped else { return }
+    // 起動直後（動画を開いていない）は、現在を付け替えるだけで音は出さない。
+    guard playback.title != nil else { return }
+    // 停止中に付け替えだけにすると、画面の動画（削除した項目）と現在の項目が食い違い、
+    // 「次へ」が1項目飛ぶ。音を出さずに動画を閉じる。
+    if playback.isClockStopped {
+      playback.stop()
+      chat.reset()
+      return
+    }
     var excluded = Set<UUID>()
     var skippedNames: [String] = []
     while true {
