@@ -96,7 +96,7 @@ final class PlayerModel {
     }
     earlyAdvanceTask = Task { [weak self] in
       while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(100))
+        try? await Task.sleep(for: .milliseconds(50))
         self?.checkEarlyAdvance()
       }
     }

@@ -8,7 +8,7 @@ import Foundation
 public enum EarlyAdvanceRule {
   /// 終わりまで残りこの実時間（秒）になったら、先行して次へ進む。値は実機の `先行切り替え 残り=` のログで、
   /// 削れるか確かめる。
-  public static let marginSeconds: TimeInterval = 0.5
+  public static let marginSeconds: TimeInterval = 0.3
   /// 再生が始まってすぐの誤発火を防ぐ。
   public static let minimumPlayed: TimeInterval = 1.0
 
