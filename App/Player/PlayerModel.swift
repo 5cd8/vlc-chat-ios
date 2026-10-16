@@ -261,6 +261,7 @@ final class PlayerModel {
 
   func recordPosition() {
     guard let identity = currentIdentity, let positionRecorder else { return }
+    expireRestoreIfTimedOut()
     let at = now
     let pending = ResumeRules.isResumePending(
       secondsSincePlaying: playingSince.map { at - $0 }, restoreCompleted: restoreCompleted)
@@ -274,7 +275,18 @@ final class PlayerModel {
 
   /// 再生が始まり、長さが確定し、シークできるようになってから、絶対位置へシークする。
   /// `:start-time` は使わない（タイムラインが切り詰められ、表示の位置・長さがずれる）。
+  /// 復元待ちの5秒を過ぎたら、復元はしないと決める。決めないと、停止後に再生ボタンで再開したとき
+  /// `playingSince` が立ち直り、古い位置へ再びシークしてしまう。
+  private func expireRestoreIfTimedOut() {
+    guard !restoreCompleted, let since = playingSince,
+      !ResumeRules.isResumePending(secondsSincePlaying: now - since, restoreCompleted: false)
+    else { return }
+    restoreCompleted = true
+    savedPosition = nil
+  }
+
   private func tryRestore() {
+    expireRestoreIfTimedOut()
     guard !restoreCompleted, clock.mode == .playing, isSeekable, let duration, duration > 0,
       let since = playingSince,
       ResumeRules.isResumePending(secondsSincePlaying: now - since, restoreCompleted: false)

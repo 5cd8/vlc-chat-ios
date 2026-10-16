@@ -34,7 +34,6 @@ struct PlaylistView: View {
           }
         }
       }
-      .environment(\.editMode, $editMode)
       .navigationTitle("プレイリスト")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -51,6 +50,8 @@ struct PlaylistView: View {
         }
       }
     }
+    // ツールバーの EditButton も同じ値を切り替えるよう、NavigationStack 全体に渡す。
+    .environment(\.editMode, $editMode)
     .fileImporter(
       isPresented: $showsImporter, allowedContentTypes: importTypes, allowsMultipleSelection: allowsMultiple
     ) { result in

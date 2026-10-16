@@ -112,6 +112,7 @@ struct PlaylistTests {
     let playlist = makePlaylist()
     #expect(playlist.nextStep(isPlayable: unplayable(["d"])) == Playlist.Step(target: 4, skipped: [3]))
     #expect(playlist.nextStep(isPlayable: unplayable(["d", "e"])) == Playlist.Step(target: nil, skipped: [3, 4]))
+    #expect(makePlaylist(current: nil).nextStep(isPlayable: unplayable([])) == Playlist.Step(target: nil, skipped: []))
     let last = makePlaylist(current: "e")
     #expect(last.nextStep(isPlayable: unplayable([])) == Playlist.Step(target: nil, skipped: []))
   }
