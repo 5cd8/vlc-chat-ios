@@ -35,5 +35,6 @@ Macが無い環境で開発しているため、ビルドはGitHub Actions（`.g
 - `project.yml`（XcodeGen）から `VLCWithChat.xcodeproj` を生成する。`.xcodeproj` はコミットしない。
 - `scripts/make-ipa.sh` が署名なしipa（`vlc-with-chat-unsigned.ipa`）と、`ldid -S` で偽署名をかけた同じビルド（`vlc-with-chat-fakesigned.ipa`）を作る。実機へは、iloader（PC）またはSideStoreが署名してインストールする。
 - タグ `m<M>-<n>`（例：`m1-1`）をpushすると、2つのipaとLGPL-2.1の全文をReleaseに載せる。
+- アプリアイコンは `scripts/make-app-icon.py`（Pillow）で描く。変えるときは `pip install pillow` → スクリプトを編集 → `python scripts/make-app-icon.py` → `App/Assets.xcassets/AppIcon.appiconset/AppIcon.png` をコミットする（CIでは生成しない）。
 - ロジックは `Packages/VLCChatCore` に分け、`swift test --package-path Packages/VLCChatCore` でテストする。このPackageは `SwiftVLC` に依存させない（libVLCのコピーがプロセス内に2つできると未定義動作になるため）。
 
