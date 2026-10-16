@@ -7,13 +7,21 @@ struct PlayerScreen: View {
   @Environment(\.scenePhase) private var scenePhase
   @State private var showsFileImporter = false
   @State private var pip: PiPController?
+  @State private var showsPlaylist = false
+  @State private var showsSettings = false
 
   var body: some View {
     let model = app.playback
     VStack(spacing: 0) {
       video(model)
       if model.title != nil {
-        ControlsView(model: model) { showsFileImporter = true }
+        ControlsView(
+          model: model, playlist: app.playlist,
+          onPickFile: { showsFileImporter = true },
+          onShowPlaylist: { showsPlaylist = true },
+          onShowSettings: { showsSettings = true },
+          onPrevious: { app.previousItem() },
+          onNext: { app.nextItem() })
         ChatPanelView(app: app)
       } else {
         Spacer(minLength: 0)
@@ -31,7 +39,8 @@ struct PlayerScreen: View {
     .alert(
       "確認してください",
       isPresented: Binding(
-        get: { app.alertMessage != nil },
+        // シートの表示中は、シート側の .alert だけが出す。
+        get: { app.alertMessage != nil && !showsPlaylist && !showsSettings },
         // 消す処理はここ1か所だけにする。ボタンの処理でも消すと、1回の操作で通知が2件消える。
         set: { if !$0 { app.dismissAlert() } }
       )
@@ -40,6 +49,8 @@ struct PlayerScreen: View {
     } message: {
       Text(app.alertMessage ?? "")
     }
+    .sheet(isPresented: $showsPlaylist) { PlaylistView(app: app) }
+    .sheet(isPresented: $showsSettings) { SettingsView(app: app) }
     .onChange(of: pip.map { ObjectIdentifier($0) }) { model.attachPiP(pip) }
     .onChange(of: scenePhase) { model.sceneDidChange(isActive: scenePhase == .active, name: "\(scenePhase)") }
   }
@@ -55,8 +66,23 @@ struct PlayerScreen: View {
       if let error = model.setupError {
         Text(error).foregroundStyle(.white).padding()
       } else if model.title == nil {
-        Button("ファイルを選択") { showsFileImporter = true }
-          .buttonStyle(.borderedProminent)
+        HStack {
+          Button("ファイルを選択") { showsFileImporter = true }
+            .buttonStyle(.borderedProminent)
+          if !app.playlist.playlist.entries.isEmpty {
+            Button("プレイリスト") { showsPlaylist = true }
+              .buttonStyle(.bordered)
+          }
+        }
+        // 歯車は動画を開いていないときも出す（再生中は操作パネルのボタンが担う）。
+        VStack {
+          HStack {
+            Spacer()
+            Button { showsSettings = true } label: { Image(systemName: "gearshape").padding(12) }
+              .accessibilityLabel("設定")
+          }
+          Spacer()
+        }
       } else {
         // .contentShape が無いと、透明な領域はタップに反応しない。
         Color.clear

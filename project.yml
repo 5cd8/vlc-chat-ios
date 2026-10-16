@@ -21,6 +21,9 @@ targets:
       - path: App
         excludes:
           - Info.plist
+      # ライセンス表示（LicensesView）が読む全文をバンドルに入れる。
+      - path: licenses
+        buildPhase: resources
     dependencies:
       - package: SwiftVLC
       - package: VLCChatCore
