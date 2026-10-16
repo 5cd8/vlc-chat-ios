@@ -26,7 +26,6 @@ struct PlayerScreen: View {
       } else {
         Spacer(minLength: 0)
       }
-      DiagnosticsView(app: app)
     }
     .fileImporter(isPresented: $showsFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
       switch result {

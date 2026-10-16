@@ -20,6 +20,7 @@ struct SettingsView: View {
         }
         Section("このアプリについて") {
           NavigationLink("ライセンス") { LicensesView() }
+          NavigationLink("診断") { DiagnosticsView(app: app) }
           LabeledContent("バージョン", value: app.diagnostics.versionText)
         }
       }

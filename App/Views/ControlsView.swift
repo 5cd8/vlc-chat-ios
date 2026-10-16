@@ -16,7 +16,7 @@ struct ControlsView: View {
   @Environment(\.scenePhase) private var scenePhase
 
   var body: some View {
-    VStack(spacing: 12) {
+    VStack(spacing: 8) {
       seekBar
       HStack(spacing: 24) {
         Button(action: onPrevious) { Image(systemName: "backward.end.fill").font(.title2) }
@@ -60,7 +60,8 @@ struct ControlsView: View {
       }
       .buttonStyle(.bordered)
     }
-    .padding(12)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
   }
 
   /// 現在位置とシークバーは、補間した位置を0.1秒ごとに描く（一時停止中・停止中も動かし続けて、
