@@ -81,7 +81,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME"             build/vlc-with-chat-unsigned.ipa             build/vlc-with-chat-fakesigned.ipa             licenses/LGPL-2.1.txt             --latest             --title "vlc-with-chat ${GITHUB_REF_NAME#v}"             --notes-file - <<'NOTES'
+          gh release create "$GITHUB_REF_NAME" \
+            build/vlc-with-chat-unsigned.ipa \
+            build/vlc-with-chat-fakesigned.ipa \
+            licenses/LGPL-2.1.txt \
+            --latest \
+            --title "vlc-with-chat ${GITHUB_REF_NAME#v}" \
+            --notes-file - <<'NOTES'
           iPhone向けのチャットリプレイ付き動画プレーヤー（vlc-with-chat）の正式版です。
 
           - vlc-with-chat-unsigned.ipa: 署名なしのipaです。iloader（PC）の「Import IPA」、またはSideStoreで署名して入れてください。無料のApple IDでは、署名が7日で切れ、同時に入れられるアプリは3つまでです。
