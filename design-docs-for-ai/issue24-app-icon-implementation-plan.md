@@ -38,7 +38,7 @@
 
 - target `VLCWithChat` の `settings.base` に `ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon` を、`CURRENT_PROJECT_VERSION` の後に追加（`MARKETING_VERSION` の行に接しない位置にして、PR #23 との衝突を避ける）。プリセットと重複するが、アイコン名を明示して意図を残すために書く。
 - `sources: - path: App` は `Assets.xcassets` を自動でリソースとして取り込む（XcodeGen の仕様）。追加の指定は不要だが、`xcodegen generate` 後の pbxproj に `Assets.xcassets` が Resources に入ることを CI の結果（下記検査）で確かめる。
-- 一次情報: XcodeGen ProjectSpec（sources の自動分類）、Apple「Configuring your app icon using an asset catalog」。実装時にインストール版の挙動で確認し、取り込まれない場合は `sources` に `type: resources` 付きで明示する。
+- 一次情報: https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md （sources の buildPhase）、https://developer.apple.com/documentation/xcode/configuring-your-app-icon 。CIは `brew install xcodegen`（版は固定していない）で、Macも無いので、取り込みの確認はCIの結果（検査）で行う。取り込まれない場合は `sources` に `buildPhase: resources` を付けて明示する（既存の `licenses` と同じ書き方）。
 
 ### 4. `scripts/make-ipa.sh` に検査を追加
 
@@ -46,7 +46,7 @@
 
 - `build/verify/Payload/$APP_NAME.app/Assets.car` が存在すること。（`AppIcon60x60@2x.png` がバンドル直下にできるかは、Xcode 26＋単一サイズで確認できていないので必須にしない。失敗時の `ls` で見えるようにするだけ。）
 - `plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw -o - "$plist"` が `AppIcon` であること。**`-o -` を必ず付ける**（無いとplistが抽出結果で上書きされる。既存の検査と同じ書き方）。
-- 検査は `set -e` で途中終了しない形で書く: `if ! icon_name="$(plutil -extract ... raw -o - "$plist" 2>&1)" || [ "$icon_name" != AppIcon ]; then ...; exit 1; fi`。いずれかが失敗したら、`echo "CFBundleIconName: $icon_name" >&2`（plutilのエラー文が入っている）、`plutil -p "$plist" >&2`、`ls` でplist全体とバンドルの中身をログに出してから `exit 1` する。キーパスが違っていてもCIを1回回せば正しい値が分かる（Macが無くローカルで確かめられないため）。
+- 検査は `set -e` で途中終了しない形で書く: `if ! icon_name="$(plutil -extract ... raw -o - "$plist" 2>&1)" || [ "$icon_name" != AppIcon ]; then ...; exit 1; fi`。いずれかが失敗したら、`echo "CFBundleIconName: $icon_name" >&2`（plutilのエラー文が入っている）、`plutil -p "$plist" >&2`、`ls` でplist全体とバンドルの中身をログに出してから `exit 1` する。失敗メッセージは既存の検査と同じく `($ipa)` を含め、unsigned/fakesignedのどちらで落ちたか分かるようにする。キーパスが違っていてもCIを1回回せば正しい値が分かる（Macが無くローカルで確かめられないため）。
 
 ### 5. README
 
@@ -69,7 +69,7 @@
 
 ## 品質管理
 
-- CI（`build-ipa.yml`）が警告0・既存テスト成功・ipa検査OKで通ること。`Assets.xcassets` 追加で actool の警告（例：未使用／サイズ不正）が出ないこと。基準は「main直近のCIの `xcodebuild.log` の `warning:` 件数」とし、本PRで件数が増えない（0なら0のまま）こと。確認は、成果物 `ipa` に含まれる `build/xcodebuild.log` を `grep -n "warning:"` し、actool／Assets.xcassets 由来の警告が無いことを見る（CI自体には警告で失敗させる仕組みは無い）。
+- CI（`build-ipa.yml`）が警告0・既存テスト成功・ipa検査OKで通ること。`Assets.xcassets` 追加で actool の警告（例：未使用／サイズ不正）が出ないこと。Issueの「警告0」は、新たに警告を出さないこと（アセット由来の警告が0）と読む。基準値は実装前に取る: `gh run list --branch main --workflow build-ipa.yml` で直近の成功runを選び、`gh run download <id> -n ipa` で得た `xcodebuild.log` を `grep -c "warning:"`。本PRのrunで件数が基準から増えないこと（基準が0なら0）。基準が0でなければユーザーに報告する。確認は、成果物 `ipa` に含まれる `build/xcodebuild.log` を `grep -n "warning:"` し、actool／Assets.xcassets 由来の警告が無いことを見る（CI自体には警告で失敗させる仕組みは無い）。
 - 画像は実際に描いてから見る（`Read` で PNG を開く）。さらに、60x60 程度に縮小したプレビューも作って小さくても判別できるか確認する（00 項目23）。
 
 ## 動作確認の手順
@@ -81,9 +81,9 @@
 ## 実装順序
 
 1. `pip install pillow`（この機器）。
-2. スクリプト作成→実行→画像を見て調整→縮小プレビュー確認。
+2. スクリプト作成→実行→画像を見て調整→縮小プレビュー確認（特に、吹き出しと三角の隙間が小さい表示でも見えるか。吹き出しがIssueの「小さな吹き出し」として大きすぎないかは、ユーザーの意匠確認に委ねる）。
 3. アセットカタログ JSON、`project.yml`。
 4. `make-ipa.sh` 検査、README。
-5. `feature/**` のpushでCIが走る（`build-ipa.yml` の `on.push.branches`）。pushしてCIを確認する。PR作成はユーザーの指示後。
-6. コミット前に `git diff --cached --stat` で行数を確かめる（新規の `.py`・`Contents.json` がCRLFになっていないか。02 項目10）。
-7. セルフレビュー3回（00 項目18：追加シンボル参照のgrep、JSONの構文確認（`python -m json.tool <file>`）、72行目の `warning:` 件数の確認）。
+5. コミット前に `git diff --cached --stat` で行数を確かめる（新規の `.py`・`Contents.json` がCRLFになっていないか。02 項目10。この機器は autocrlf=true でコミット時にLF化されるが、念のため確認）。
+6. `feature/**` のpushでCIが走る（`build-ipa.yml` の `on.push.branches`）。pushしてCIを確認する。PR作成はユーザーの指示後。
+7. セルフレビュー3回（00 項目18：追加シンボル参照のgrep、JSONの構文確認（`python -m json.tool <file>`）、「品質管理」の節の `warning:` 件数の確認）。
