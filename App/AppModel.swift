@@ -27,6 +27,9 @@ final class AppModel {
   private let audioSession: AudioSessionController
   private let relay: NavigationRelay
 
+  /// 切り替えの後にPiPが使えなくなったときの開き直しの待機（Issue #12）。新しい切り替えで取り消す。
+  @ObservationIgnored private var pipRecoveryTask: Task<Void, Never>?
+
   /// 利用者に知らせる通知の待ち行列（動画を開けなかった理由は `playback.openError` が別に持つ）。
   private(set) var notices: [String] = []
 
@@ -64,6 +67,8 @@ final class AppModel {
     playback.resumeLookup = { [resume] identity in resume.position(for: identity) }
     playback.positionRecorder = { [resume] identity, position in resume.record(position, for: identity) }
     playback.onEnded = { [relay] identity in relay.model?.handlePlaybackEnded(identity) }
+    playback.earlyAdvanceEnabled = { [settings, playlist] in settings.autoAdvance && playlist.playlist.hasNext }
+    playback.onEarlyAdvance = { [relay] identity in relay.model?.handleEarlyAdvance(identity) }
     playback.navigationState = { [playlist] in
       (canGoPrevious: playlist.playlist.hasPrevious, canGoNext: playlist.playlist.hasNext)
     }
@@ -216,7 +221,7 @@ final class AppModel {
   /// プレイリスト画面のタップ、自動進行、前へ・次へ、置き換えから呼ぶ。成功＝動画が開けた。
   /// 失敗しても現在の項目は動かさない（開けたあとで `setCurrent` する）。
   @discardableResult
-  func playItem(at index: Int, byUser: Bool) -> Bool {
+  func playItem(at index: Int, byUser: Bool, isPiPRecovery: Bool = false) -> Bool {
     guard playlist.playlist.entries.indices.contains(index) else { return false }
     let entry = playlist.playlist.entries[index]
     playback.recordPosition()
@@ -245,7 +250,48 @@ final class AppModel {
       }
     }
     playback.refreshRemote()
+    // 開き直し自体の後には、さらに開き直さない（一度だけ）。
+    if !isPiPRecovery { schedulePiPRecovery(entryID: entry.id) }
     return true
+  }
+
+  /// 切り替えの後、PiPが使えない状態（`isPossible == false`）になっていたら、同じ動画を一度だけ開き直す。
+  /// 実機では、開き直す以外にPiPを戻せた操作が無かった（Issue #12）。
+  /// 判定は項目のIDで照合し、待つ間にユーザーが別の動画へ替えていたら何もしない。
+  private func schedulePiPRecovery(entryID: UUID) {
+    pipRecoveryTask?.cancel()
+    pipRecoveryTask = Task { [weak self] in
+      do {
+        try await Task.sleep(for: .seconds(1.5))
+        // 準備中（まだ再生が始まっていない）なら、判定を延ばす。
+        var waited = 0.0
+        while let self, self.playback.needsPlaybackWait, waited < 3 {
+          try await Task.sleep(for: .milliseconds(500))
+          waited += 0.5
+        }
+      } catch {
+        return
+      }
+      guard let self, self.playlist.playlist.currentID == entryID else { return }
+      guard self.playback.needsPiPRecovery() else {
+        if !self.playback.isPiPPossible {
+          AppLog.write("PiP回復 見送り 理由=\(self.playback.pipStatusText)")
+        }
+        return
+      }
+      guard let index = self.playlist.playlist.entries.firstIndex(where: { $0.id == entryID }) else { return }
+      AppLog.write("PiP回復 開き直し \(self.playback.pipStatusText)")
+      guard self.playItem(at: index, byUser: false, isPiPRecovery: true) else {
+        AppLog.write("PiP回復 失敗")
+        return
+      }
+      do {
+        try await Task.sleep(for: .seconds(2))
+      } catch {
+        return
+      }
+      AppLog.write("PiP回復 結果 \(self.playback.pipStatusText)")
+    }
   }
 
   // MARK: - 自動進行・前へ・次へ
@@ -261,14 +307,14 @@ final class AppModel {
   /// 有効な項目が見つかるまで探す。開けなかった項目は `excluded` に溜めて再探索する。
   /// 有効な項目が無いとき、手で押した前へ・次へは再生中の動画を止めない（ユーザー確定）。
   /// 最後まで再生した後の自動進行は、もう再生が終わっているので停止状態にする。
-  private func advance(stopsWhenNone: Bool, _ step: (Set<UUID>) -> Playlist.Step) {
+  private func advance(stopsWhenNone: Bool, silent: Bool = false, _ step: (Set<UUID>) -> Playlist.Step) {
     var excluded = Set<UUID>()
     while true {
       let result = step(excluded)
       let skippedNames = result.skipped.compactMap { name(at: $0) }
       guard let target = result.target else {
         // 有効な項目が無ければ停止する（動画は閉じない）。端の項目で押したときは何もしない。
-        if !result.skipped.isEmpty {
+        if !result.skipped.isEmpty, !silent {
           if stopsWhenNone { playback.stopKeepingTitle() }
           notify("開けない項目を飛ばしました", names: skippedNames)
           notices.append("再生できる項目がありません")
@@ -288,6 +334,14 @@ final class AppModel {
     resume.remove(identity)
     guard settings.autoAdvance, playlist.playlist.hasNext else { return }
     advance(stopsWhenNone: true) { self.playlist.nextStep(excluding: $0) }
+  }
+
+  /// PiP中、終端の手前で次へ進む。開ける項目が無くても通知も停止もしない（動画はそのまま終端まで再生され、
+  /// 終端の `handlePlaybackEnded` が従来どおり扱う）。ただし開くこと自体に失敗した場合は、
+  /// 手動の切り替えと同じく `openError` のアラートが出る。
+  func handleEarlyAdvance(_ identity: VideoIdentity?) {
+    resume.remove(identity)
+    advance(stopsWhenNone: false, silent: true) { self.playlist.nextStep(excluding: $0) }
   }
 
   // MARK: - プレイリスト画面の操作

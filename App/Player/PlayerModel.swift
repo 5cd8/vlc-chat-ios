@@ -30,6 +30,13 @@ final class PlayerModel {
   @ObservationIgnored var positionRecorder: ((VideoIdentity, TimeInterval) -> Void)?
   /// 最後まで再生した（`endReached`）。
   @ObservationIgnored var onEnded: ((VideoIdentity?) -> Void)?
+  /// PiP中の先行切り替えを行う条件（自動進行が有効で、次の動画がある）。`AppModel` が配線する。
+  @ObservationIgnored var earlyAdvanceEnabled: (() -> Bool)?
+  /// 終端の手前に達した。呼び出し側が、記憶の削除と次の動画への切り替えを行う。
+  @ObservationIgnored var onEarlyAdvance: ((VideoIdentity?) -> Void)?
+  /// 同じ動画で先行切り替えを一度だけ行うための印。残りが閾値の2倍を超えて戻る（シーク）と下ろす。
+  @ObservationIgnored private var earlyAdvanceFired = false
+  @ObservationIgnored private var earlyAdvanceTask: Task<Void, Never>?
   /// ロック画面の前へ・次への有効・無効。
   @ObservationIgnored var navigationState: (() -> (canGoPrevious: Bool, canGoNext: Bool))?
   /// 開いた動画の識別（名前＋サイズ）。サイズが取れなければ nil＝記憶しない。
@@ -44,12 +51,15 @@ final class PlayerModel {
   @ObservationIgnored private var hasReachedEnd = false
   @ObservationIgnored private var recordTask: Task<Void, Never>?
   /// 直近の映像トラックの要約（コーデック・解像度・fps）。PiPが使える動画と使えない動画を、映像の特性で
-  /// 突き合わせるための暫定の診断（Issue #12 第1段階）。原因と対策が決まったら、配線ごと消す。
+  /// 突き合わせるための暫定の診断（Issue #12 第1段階）。対策の効果を確かめた後の別PRで、配線ごと消す。
   @ObservationIgnored private var videoSummary = "-"
   @ObservationIgnored private var clock = PlaybackClock()
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
   @ObservationIgnored private var possibleTask: Task<Void, Never>?
+  /// 暫定の診断（Issue #12 第2段階）。差し替えのたびに、SwiftVLCがPiPを保てたか（restored）、
+  /// 保てなかったか（timedOut）を残す。対策の効果を確かめた後の別PRで、配線ごと消す。
+  @ObservationIgnored private var continuityTask: Task<Void, Never>?
   /// 中断・経路の消失の後は、音声出力が無音のまま残る（M1実機）。次に再生が始まるとき作り直す。
   @ObservationIgnored private var needsAudioRestart = false
   /// 中断の開始で、こちらが一時停止した。終了時に `shouldResume` なら再開する。
@@ -82,6 +92,13 @@ final class PlayerModel {
         try? await Task.sleep(for: .seconds(5))
         guard let self else { return }
         if self.clock.mode == .playing { self.recordPosition() }
+      }
+    }
+    earlyAdvanceTask = Task { [weak self] in
+      while !Task.isCancelled {
+        try? await Task.sleep(for: .milliseconds(50))
+        guard let self else { return }
+        self.checkEarlyAdvance()
       }
     }
   }
@@ -139,6 +156,7 @@ final class PlayerModel {
     playingSince = nil
     isSeekable = false
     hasReachedEnd = false
+    earlyAdvanceFired = false
     // 再生中に差し替えたとき、状態が `.playing` のまま変わらず通知が来ない場合に備える。
     // 通知が来ても `clock.play(at:)` は冪等。
     if player.state == .playing {
@@ -284,6 +302,46 @@ final class PlayerModel {
     AppLog.write("映像 トラック \(summary) 契機=\(trigger)")
   }
 
+  // MARK: - 先行切り替え
+
+  /// PiP中だけ、終端の手前で次へ進む。終端ではlibVLCが映像出力を壊し、`endReached` を待つとPiPが止まる。
+  /// 前面（PiPでない）では従来どおり `endReached` で進める（音声の最後を削らないため）。
+  private func checkEarlyAdvance() {
+    guard clock.mode == .playing, player?.state == .playing, let duration = clock.duration else { return }
+    let at = now
+    let position = clock.position(at: at)
+    let remaining = duration - position
+    // シークで戻ったときの再発火のため。この判定は発火済みの条件より先に置く。
+    if earlyAdvanceFired, EarlyAdvanceRule.shouldRearm(position: position, duration: duration, rate: clock.rate) {
+      earlyAdvanceFired = false
+      hasReachedEnd = false
+    }
+    guard !earlyAdvanceFired, pip?.isActive == true, earlyAdvanceEnabled?() == true,
+      EarlyAdvanceRule.shouldAdvance(position: position, duration: duration, rate: clock.rate)
+    else { return }
+    earlyAdvanceFired = true
+    // 記憶は残さない（終端の位置を再開位置にしない）。`endReached` と同じ扱い。
+    hasReachedEnd = true
+    AppLog.write(
+      String(format: "先行切り替え 残り=%.2fs（実時間） ", remaining / max(clock.rate, 0.01)) + (title ?? "-"))
+    onEarlyAdvance?(currentIdentity)
+  }
+
+  /// 次へ進んだ後にPiPが使えなくなっているか（開き直しの対象か）。
+  /// 前面かつ再生中に限る。背面やPiPの起動待ちでは開き直さない。
+  func needsPiPRecovery() -> Bool {
+    guard let pip, !pip.isActive, !pip.isPossible, player?.state == .playing else { return false }
+    return diagnostics.scenePhaseName == "active"
+  }
+
+  /// 開き直しの判定を延ばすか（再生の準備中）。
+  var needsPlaybackWait: Bool {
+    guard let state = player?.state else { return false }
+    return state == .opening || state == .buffering
+  }
+
+  var isPiPPossible: Bool { pip?.isPossible ?? false }
+
   // MARK: - 再生位置の記憶
 
   func recordPosition() {
@@ -393,12 +451,13 @@ final class PlayerModel {
   func attachPiP(_ controller: PiPController?) {
     pipTask?.cancel()
     possibleTask?.cancel()
+    continuityTask?.cancel()
     pip = controller
     diagnostics.pipActive = controller?.isActive ?? false
     guard let controller else { return }
     AppLog.write("PiPController 取得 isPossible=\(controller.isPossible)")
     // 暫定: 動画を開き直すまでPiPが使えなくなる現象（自動PiPが起動しない）の切り分け用。
-    // 可否が変わった時刻を残す。原因が分かったら、配線ごと消す。
+    // 可否が変わった時刻を残す。対策の効果を確かめた後の別PRで、配線ごと消す。
     possibleTask = Task { [weak self, weak controller] in
       var last = controller?.isPossible
       while !Task.isCancelled {
@@ -411,6 +470,14 @@ final class PlayerModel {
         }
       }
     }
+    // `self` を捕まえない（ログを書くだけ）。
+    continuityTask = Task {
+      for await event in controller.pipContinuityEvents {
+        AppLog.write(
+          "PiP継続 \(event.outcome) 経過=\(event.elapsed) 前世代=\(event.previousMediaGeneration) "
+            + "後世代=\(event.mediaGeneration) 制御世代=\(event.controllerGeneration)")
+      }
+    }
     pipTask = Task { [weak self] in
       for await envelope in controller.pipEventEnvelopes {
         guard let self else { return }
@@ -419,6 +486,11 @@ final class PlayerModel {
         self.diagnostics.pipActive = controller.isActive
       }
     }
+  }
+
+  /// 開き直しの結果のログ用（Issue #12 の暫定の診断）。
+  var pipStatusText: String {
+    "isPossible=\(pip?.isPossible ?? false) isActive=\(pip?.isActive ?? false) \(stateDescription)"
   }
 
   func startPiP() {
