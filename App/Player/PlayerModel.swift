@@ -30,7 +30,6 @@ final class PlayerModel {
   @ObservationIgnored var positionRecorder: ((VideoIdentity, TimeInterval) -> Void)?
   /// 最後まで再生した（`endReached`）。
   @ObservationIgnored var onEnded: ((VideoIdentity?) -> Void)?
-  /// ロック画面の前へ・次への有効・無効。
   /// PiP中の先行切り替えを行う条件（自動進行が有効で、次の動画がある）。`AppModel` が配線する。
   @ObservationIgnored var earlyAdvanceEnabled: (() -> Bool)?
   /// 終端の手前に達した。呼び出し側が、記憶の削除と次の動画への切り替えを行う。
@@ -38,6 +37,7 @@ final class PlayerModel {
   /// 同じ動画で先行切り替えを一度だけ行うための印。残りが閾値の2倍を超えて戻る（シーク）と下ろす。
   @ObservationIgnored private var earlyAdvanceFired = false
   @ObservationIgnored private var earlyAdvanceTask: Task<Void, Never>?
+  /// ロック画面の前へ・次への有効・無効。
   @ObservationIgnored var navigationState: (() -> (canGoPrevious: Bool, canGoNext: Bool))?
   /// 開いた動画の識別（名前＋サイズ）。サイズが取れなければ nil＝記憶しない。
   @ObservationIgnored private var currentIdentity: VideoIdentity?
@@ -321,7 +321,8 @@ final class PlayerModel {
     earlyAdvanceFired = true
     // 記憶は残さない（終端の位置を再開位置にしない）。`endReached` と同じ扱い。
     hasReachedEnd = true
-    AppLog.write(String(format: "先行切り替え 残り=%.2fs（実時間）", remaining / max(clock.rate, 0.01)))
+    AppLog.write(
+      String(format: "先行切り替え 残り=%.2fs（実時間） ", remaining / max(clock.rate, 0.01)) + (title ?? "-"))
     onEarlyAdvance?(currentIdentity)
   }
 
