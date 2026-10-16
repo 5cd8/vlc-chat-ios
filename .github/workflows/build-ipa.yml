@@ -3,7 +3,7 @@ name: build-ipa
 on:
   push:
     branches: [main, "feature/**"]
-    tags: ["m[0-9]-*"]
+    tags: ["m[0-9]-*", "v[0-9]*"]
 
 env:
   # ランナーイメージの更新で既定が変わり得るため、Xcodeを固定する。
@@ -65,7 +65,43 @@ jobs:
             build/vlc-with-chat-fakesigned.ipa
             build/xcodebuild.log
           if-no-files-found: warn
-      - name: Releaseを作る
+      # 正式版のタグ v<版> は、project.yml の MARKETING_VERSION と一致していなければ作らない
+      # （ipaの表示版とタグがずれたまま公開しないため）。
+      - name: タグとアプリの版が一致するか確かめる
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          app_version="$(plutil -extract CFBundleShortVersionString raw -o - build/ipa/Payload/VLCWithChat.app/Info.plist)"
+          if [ "$tag_version" != "$app_version" ]; then
+            echo "タグ($GITHUB_REF_NAME)とアプリの版($app_version)が違う" >&2
+            exit 1
+          fi
+      - name: 正式版のReleaseを作る
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            build/vlc-with-chat-unsigned.ipa \
+            build/vlc-with-chat-fakesigned.ipa \
+            licenses/LGPL-2.1.txt \
+            --latest \
+            --title "vlc-with-chat ${GITHUB_REF_NAME#v}" \
+            --notes-file - <<'NOTES'
+          iPhone向けのチャットリプレイ付き動画プレーヤー（vlc-with-chat）の正式版です。
+
+          - vlc-with-chat-unsigned.ipa: 署名なしのipaです。iloader（PC）の「Import IPA」、またはSideStoreで署名して入れてください。無料のApple IDでは、署名が7日で切れ、同時に入れられるアプリは3つまでです。
+          - vlc-with-chat-fakesigned.ipa: 同じビルドに `ldid -S` で偽署名をかけたもの。unsigned が取り込めないときの代替です。
+          - 対象は iPhone（iOS 18以上）、縦画面のみ、表示は日本語のみです。
+
+          ## ライセンス（LGPL）
+          このアプリは libVLC（LGPL-2.1以上）を静的リンクした SwiftVLC を含みます。LGPL-2.1の全文は、このReleaseの `LGPL-2.1.txt` です。
+
+          - SwiftVLC（MIT）: https://github.com/harflabs/SwiftVLC （使用版 1.1.0-beta.14）
+          - libVLC のソース: SwiftVLC が同梱するxcframeworkは、VideoLAN の vlc（https://code.videolan.org/videolan/vlc ）に SwiftVLC 独自のパッチを当ててビルドしたものです。固定したコミットとパッチは、SwiftVLC の v1.1.0-beta.14 タグの `scripts/build-libvlc.sh` と `scripts/patches/` にあります。
+          - 再ビルドの手順: このリポジトリの `.github/workflows/build-ipa.yml` と `scripts/make-ipa.sh`
+          NOTES
+      - name: 確認用のReleaseを作る
         if: startsWith(github.ref, 'refs/tags/m')
         env:
           GH_TOKEN: ${{ github.token }}
