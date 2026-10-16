@@ -35,38 +35,51 @@ PRは `Refs #12`（`Closes` にしない）。
 3. コメント：なぜ残すか（自動進行・手動の差し替えで、SwiftVLCがPiPを保つ仕組みが働いたかを知るため。Issue #12 第2段階）と、暫定の診断で、原因と対策が決まったら配線ごと消すこと。
 
 ### 2.2 実験ボタン（暫定）
-1. **`App/Diagnostics/PiPExperiment.swift`（新規）**：`enum PiPExperiment: String, CaseIterable { case pauseResume, reopenCurrent, recreateView, measure }`。表示名（日本語）を持つ（`pauseResume` = 「一時停止→再開」、`reopenCurrent` = 「同じ動画を開き直す」、`recreateView` = 「PiPの描画面を作り直す」、`measure` = 「今の可否を測る」）。
+1. **`App/Diagnostics/PiPExperiment.swift`（新規）**：`enum PiPExperiment: String, CaseIterable, Identifiable { case pauseResume, reopenCurrent, recreateController, measure }`。`var id: Self { self }`、`var title: String`（日本語の表示名）。`pauseResume` = 「一時停止→再開」、`reopenCurrent` = 「同じ動画を開き直す」、`recreateController` = 「PiPControllerを作り直す（描画面は引き継ぐ）」、`measure` = 「今の可否を測る」。
 2. **`App/AppModel.swift`**：
-   - `private(set) var pipViewID = UUID()`（`recreateView` が書き換える。`PlayerScreen` が `PiPVideoView` の `.id` に使う）。
-   - `func runPiPExperiment(_ experiment: PiPExperiment)`：
-     1. `AppLog.write("実験 \(experiment.title) 開始 \(playback.pipProbe)")`（`pipProbe` は 2.3）。
-     2. 実験を実行する。`pauseResume`：`playback.pause()` → 0.5秒後に `playback.play()`。`reopenCurrent`：`playlist.playlist.currentIndex` があれば `playItem(at:byUser:false)`、無ければ `実験 対象なし` をログに出して終了。`recreateView`：`pipViewID = UUID()`。`measure`：何もしない。
-     3. 2秒後に `AppLog.write("実験 \(experiment.title) 2秒後 \(playback.pipProbe)")`。
-   - `Task { try? await Task.sleep(for: …) }` で待つ（メインアクターで）。実験は同時に1つだけ走らせる（`private var runningExperiment: Task<Void, Never>?` を持ち、新しく押したら前のを取り消す）。
+   - `private(set) var pipViewID = UUID()`（`recreateController` が書き換える。`PlayerScreen` が `PiPVideoView` の `.id` に使う）。
+   - `@ObservationIgnored private var runningExperiment: Task<Void, Never>?`。
+   - `func runPiPExperiment(_ experiment: PiPExperiment)`：新しく押したら前の実験を `cancel()` してから、`runningExperiment = Task { … }`（メインアクター）で次を行う。
+     1. `AppLog.write("実験 \(experiment.title) 開始 \(playback.pipProbe)")`。
+     2. 実験を実行する。
+        - `pauseResume`：**再生中（`playback.isPlaybackRequestedActive`）でなければ** `実験 \(title) 対象外（再生中でない）` をログに出して終了。再生中なら `playback.pause()` → 0.5秒待つ → `playback.play()`。待っている間に取り消されても、**必ず `playback.play()` を呼ぶ**（`defer` ではなく、取り消し時の分岐で呼び、一時停止のまま残さない）。
+        - `reopenCurrent`：`playlist.playlist.currentIndex` があれば `playItem(at:byUser:false)`。無ければ `実験 \(title) 対象なし` をログに出して終了。
+        - `recreateController`：`pipViewID = UUID()`。
+        - `measure`：何もしない。
+     3. 操作の**完了から2秒後**（`pauseResume` は再開の2秒後）に `AppLog.write("実験 \(experiment.title) 2秒後 \(playback.pipProbe)")`。`reopenCurrent` は2秒でまだ opening／buffering のことがあるので、確定した可否は `PiP可 変化` のログ（500ms間隔の監視）で後追いする。
+   - **待ちは `do { try await Task.sleep(for: …) } catch { return }`**（`try?` で握りつぶさない。取り消されたのに続きが走り、「2秒後」の行がすぐ出て時刻の意味が崩れるのを防ぐ。`pauseResume` の再開は上の例外）。
 3. **`App/Player/PlayerModel.swift`**：`var pipProbe: String`（`"isPossible=\(pip?.isPossible ?? false) isActive=\(pip?.isActive ?? false) \(stateDescription) 映像=\(videoSummary)"`）。
 4. **`App/Views/PlayerScreen.swift`**：`PiPVideoView(player, controller: $pip)`（64行）に `.id(app.pipViewID)` を付ける。
-5. **`App/Views/DiagnosticsView.swift`**：`detail`（`ScrollView` の中、`line(...)` の並びの後）に、`Section` 風の見出し「PiP実験（暫定）」と `ForEach(PiPExperiment.allCases)` の `Button(experiment.title) { app.runPiPExperiment(experiment) }` を足す。動画を開いていない（`app.playback.title == nil`）ときは、ボタンを `.disabled`。コメントに「暫定。原因と対策が決まったら消す」。
+5. **`App/Views/DiagnosticsView.swift`**：`detail`（`ScrollView` の `VStack` の中、`line(...)` の並びの後）に、`Text("PiP実験（暫定）").font(.headline)` と、`ForEach(PiPExperiment.allCases) { experiment in Button(experiment.title) { app.runPiPExperiment(experiment) } }` を足す。動画を開いていない（`app.playback.title == nil`）ときも、`measure` 以外は `.disabled`（`measure` は常に有効）。コメントに「暫定。原因と対策が決まったら消す」。
+
+**`recreateController` の実態**（SwiftVLC `PiPVideoView+iOSNative.swift` の `IOSNativePiPHostView`）：再生が始まった後は、ビューを作り直しても描画面（attachment）とAVKitのコントローラは**引き継がれる**。作り直されるのはSwift側の `PiPController` だけで、`nativeBackend.isPossible` を読み直す。したがってこの実験で分かるのは、「`PiPController` の作り直し（`isPossible` の読み直し）で値が変わるか」であり、描画面やAVKitのコントローラの作り直しではない。
 
 ## 3. 設計判断
 
 | 判断 | 採用案と理由 | 採らなかった案 |
 |---|---|---|
 | 実験の置き場所 | 診断シートの暫定ボタン（ユーザー確定）。1回の実機確認で全部試せ、結果が時刻つきでログに残る | 自動で順に試す（勝手に再生が止まる・開き直される）。ログだけ |
-| `PiPVideoView` の作り直しを実験に含める | 「切り替え後の不可から戻るか」を試す手段として有力。ただしM1で自動PiPの設定が反映されない問題があったので、**実験専用**とし、挙動は `PiP継続` のログと合わせて見る | 含めない（有力な手段を試せない） |
-| 継続イベントの値の出し方 | 補間で出す（公開プロパティの有無に依存しない） | `PlaybackGeneration.value` を直接読む（公開かが未確認） |
+| `PiPVideoView` を作り直す実験を含める | `isPossible` が `PiPController` の読み直しで変わるかを確かめる手段。ボタン名は実態（PiPControllerの作り直し）に合わせる。描画面は引き継がれるので、M1で出た「自動PiPの設定が反映されない」ことは、起きにくいと見ているが未確認 | 含めない（読み直しで戻るかを試せない） |
+| 継続イベントの値の出し方 | 補間で出す（公開プロパティの有無に依存しない。SwiftVLCの検証ハーネスも同じ書き方） | `PlaybackGeneration.value` を直接読む |
+| 実験の待ちと取り消し | 取り消されたら続きを走らせない（`pauseResume` の再開だけは必ず行う） | `try?` で握りつぶす（取り消された実験の続きが即座に走り、ログが入り混じる） |
 | 単体テストを書かない | SwiftVLCの型とUIの診断で、`VLCChatCore` に出せる規則が無い | — |
 
 ## 4. 品質管理・動作確認
 
 - CIの `test`・`build` が成功すること。アプリのコードに起因する警告は残さない（`xcodebuild.log` の `warning:`）。
-- **実機確認（ユーザーの作業）**。入れるipaは Releases の `vlc-with-chat-unsigned.ipa`。ログの `起動` 行に、新しいビルド番号が出れば入っている。
-  - (a) **手で「次へ」**：遊戯王（AV1のWebM）など、不可になりやすい動画を含むプレイリストで、PiPを出した状態で「次へ」を押す。ログに `PiP継続 rebuilding` → `restored`（または `timedOut`）が出るか。PiPが保たれるか。
+- **実機確認（ユーザーの作業）**。入れるipaは Releases の `vlc-with-chat-unsigned.ipa`。ログの `起動` 行に、新しいビルド番号が出れば入っている。診断シートは `.medium` のまま操作する（`.large` は動画を覆い、可否への影響を切り分けられない）。
+  - (a) **手で「次へ」**：遊戯王（AV1のWebM）など、不可になりやすい動画を含むプレイリストで、アプリ内のPiPボタンでPiPを出し、そのまま**アプリ内の「次へ」ボタン**（または、ロック画面・PiPの窓で押せるなら、その「次へ」）を押す。ログに `PiP継続 rebuilding` → `restored`（または `timedOut`）が出るか。PiPが保たれるか。
   - (b) **自動進行**：短い動画を最後まで再生し、PiPのまま次へ進む。`PiP継続` が出るか。`PiPイベント … cause=controllerReplaced` が出るか。
-  - (c) **不可になったとき**：「次へ」「前へ」で不可になる動画（mkv_vp9_4k_10min、遊戯王）に切り替えた直後、診断シートで「今の可否を測る」「一時停止→再開」「同じ動画を開き直す」「PiPの描画面を作り直す」を、1つずつ押す。押すたびにログの `実験 … 開始` と `2秒後` の `isPossible` を見て、**何を押すと真に戻るか**を記録する。ボタンを押す前に、PiPが使えないことを確かめる（PiPのボタンを押して `notPossible`）。
+  - (c) **不可になったとき**：実験ごとに、「次へ」「前へ」で不可の状態を作り直してから押す。手順：
+    1. mkv_vp9_4k_10min や遊戯王に「次へ」「前へ」で切り替え、PiPボタンで `notPossible` になることを確かめる。
+    2. 先に「今の可否を測る」を押し、すぐには戻らないこと（基準）を確かめる。
+    3. 実験を1つ押す。ログの `実験 … 開始` と `2秒後` の `isPossible` を見る。`PiP可 変化`（500ms間隔の監視）の時刻とも突き合わせる（不可は自然にも戻るので、2秒後に真でも偶然の回復と区別する）。
+    4. `isPossible=true` が出たら、シートを閉じてPiPボタンを押し、`PiP toggle 結果=` が `accepted` になるか記録する。PiPを閉じてから次の実験へ進む。
+    5. 同じ実験を2回くり返す。
   - ログ（診断→ログを共有）を共有する。
 - 結果は #12 にコメントで記録し、対策（次のPR）を決める材料にする。
 
 ## 5. リスク
 
-- `PiPVideoView` を作り直すと、自動PiP（ホームへ戻ったときに開始）が効かなくなることがある。実験が終わったら、アプリを再起動して元に戻す。
+- `recreateController` で `PiPController` を作り直すと、PiPのイベント購読（`attachPiP`）が張り直される。SwiftVLCは同じコードで元の方針（自動PiP）を保つと書いているが、M1のときとの違いは未確認。実験が終わったらアプリを再起動して元に戻す。
 - `pipContinuityEvents` が一度も出ない場合（Direct PiPの扱い、または保持の対象外）は、それ自体が手がかり。「出なかった」ことをログの根拠として #12 に記録する。
