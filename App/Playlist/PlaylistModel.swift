@@ -97,9 +97,7 @@ final class PlaylistModel {
 
   /// チャットを割り当てる。ブックマークを作れなければ false。
   func assignChat(entryID: UUID, url: URL) -> Bool {
-    let file = ScopedFile(url: url)
-    guard let bookmark = try? file.url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-    else { return false }
+    guard let bookmark = Self.makeBookmark(url) else { return false }
     let name = url.lastPathComponent
     playlist.updateEntry(id: entryID) {
       $0.chatFileName = name
@@ -232,21 +230,13 @@ final class PlaylistModel {
     var entries: [PlaylistEntry] = []
     var result = ReplaceResult()
     for (index, videoURL) in videos.enumerated() {
-      // アクセスしている間にブックマークを作る。
-      let video = ScopedFile(url: videoURL)
-      guard
-        let videoBookmark = try? video.url.bookmarkData(
-          options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-      else {
+      guard let videoBookmark = Self.makeBookmark(videoURL) else {
         result.failedNames.append(videoURL.lastPathComponent)
         continue
       }
       var entry = PlaylistEntry(videoFileName: videoURL.lastPathComponent, videoBookmark: videoBookmark)
       if index < chats.count, let chatURL = chats[index] {
-        let chat = ScopedFile(url: chatURL)
-        if let chatBookmark = try? chat.url.bookmarkData(
-          options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
-        {
+        if let chatBookmark = Self.makeBookmark(chatURL) {
           entry.chatFileName = chatURL.lastPathComponent
           entry.chatBookmark = chatBookmark
         } else {
@@ -256,6 +246,14 @@ final class PlaylistModel {
       entries.append(entry)
     }
     return (entries, result)
+  }
+
+  /// セキュリティスコープのアクセスを明示的に始めて止める。`ScopedFile` を変数に置くだけだと、
+  /// 最後に使った時点で解放され、`bookmarkData` を呼ぶ前にアクセスが止まり得る。
+  private static func makeBookmark(_ url: URL) -> Data? {
+    let didStart = url.startAccessingSecurityScopedResource()
+    defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+    return try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
   }
 
   private func save() {

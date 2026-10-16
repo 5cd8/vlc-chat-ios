@@ -130,6 +130,7 @@ final class AppModel {
       notify("開けない項目を飛ばしました", names: skippedNames)
     } else {
       playlist.restoreSnapshot()
+      notify("開けない項目を飛ばしました", names: skippedNames)
       notices.append("再生できる項目がありません")
     }
   }

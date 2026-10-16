@@ -6,7 +6,9 @@ struct PlaylistView: View {
   let app: AppModel
   @Environment(\.dismiss) private var dismiss
   @Environment(\.scenePhase) private var scenePhase
-  @Environment(\.editMode) private var editMode
+  // EditButton が切り替える値は NavigationStack の内側の環境に入るので、外側のこのビューでは読めない。
+  // 自前の状態を NavigationStack に渡し、行のタップでも読む。
+  @State private var editMode = EditMode.inactive
 
   private enum ImportPurpose {
     case append
@@ -32,6 +34,7 @@ struct PlaylistView: View {
           }
         }
       }
+      .environment(\.editMode, $editMode)
       .navigationTitle("プレイリスト")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {
@@ -117,7 +120,7 @@ struct PlaylistView: View {
     .contentShape(Rectangle())
     .onTapGesture {
       // 並べ替えの最中に行をタップしても再生を始めない。
-      guard editMode?.wrappedValue.isEditing != true else { return }
+      guard !editMode.isEditing else { return }
       guard let index = app.playlist.playlist.entries.firstIndex(where: { $0.id == entry.id }) else { return }
       app.playItem(at: index, byUser: true)
     }

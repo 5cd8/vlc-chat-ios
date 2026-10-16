@@ -57,7 +57,7 @@ struct VideoChatPairingTests {
     #expect(result.unmatchedChats == [0])
   }
 
-  @Test("同じ名前が複数あれば、渡された順の最初だけが使う") func duplicateNamesUseFirstOnly() {
+  @Test("同じ名前が複数あれば、渡された順の最初だけを使う") func duplicateNamesUseFirstOnly() {
     let chats = VideoChatPairing.pair(
       videoFileNames: ["A.mp4", "B.mp4"], chatFileNames: ["A.json", "A.live_chat.json"])
     #expect(chats.chatIndexForVideo == [0, nil])
