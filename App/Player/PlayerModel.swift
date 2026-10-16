@@ -433,7 +433,7 @@ final class PlayerModel {
     }
   }
 
-  /// 開き直しの結果のログ用（Issue #12 の暫定の診断）。
+  /// 開き直しの判断をログに残すための、PiPの可否と再生の状態。
   var pipStatusText: String {
     "isPossible=\(pip?.isPossible ?? false) isActive=\(pip?.isActive ?? false) \(stateDescription)"
   }
