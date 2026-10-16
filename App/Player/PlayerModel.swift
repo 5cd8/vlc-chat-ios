@@ -50,16 +50,9 @@ final class PlayerModel {
   @ObservationIgnored private var isSeekable = false
   @ObservationIgnored private var hasReachedEnd = false
   @ObservationIgnored private var recordTask: Task<Void, Never>?
-  /// 直近の映像トラックの要約（コーデック・解像度・fps）。PiPが使える動画と使えない動画を、映像の特性で
-  /// 突き合わせるための暫定の診断（Issue #12 第1段階）。対策の効果を確かめた後の別PRで、配線ごと消す。
-  @ObservationIgnored private var videoSummary = "-"
   @ObservationIgnored private var clock = PlaybackClock()
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
-  @ObservationIgnored private var possibleTask: Task<Void, Never>?
-  /// 暫定の診断（Issue #12 第2段階）。差し替えのたびに、SwiftVLCがPiPを保てたか（restored）、
-  /// 保てなかったか（timedOut）を残す。対策の効果を確かめた後の別PRで、配線ごと消す。
-  @ObservationIgnored private var continuityTask: Task<Void, Never>?
   /// 中断・経路の消失の後は、音声出力が無音のまま残る（M1実機）。次に再生が始まるとき作り直す。
   @ObservationIgnored private var needsAudioRestart = false
   /// 中断の開始で、こちらが一時停止した。終了時に `shouldResume` なら再開する。
@@ -152,7 +145,6 @@ final class PlayerModel {
     currentIdentity = file.fileSizeBytes.map { VideoIdentity(fileName: url.lastPathComponent, size: Int64($0)) }
     savedPosition = currentIdentity.flatMap { resumeLookup?($0) }
     restoreCompleted = savedPosition == nil
-    videoSummary = "-"
     playingSince = nil
     isSeekable = false
     hasReachedEnd = false
@@ -275,31 +267,8 @@ final class PlayerModel {
     currentIdentity = nil
     savedPosition = nil
     restoreCompleted = true
-    videoSummary = "-"
     syncClockState()
     remote?.update(nil)
-  }
-
-  /// 映像トラックの要約を求め、前回と違えばログに残す。
-  /// `.tracksChanged`／`.voutChanged` を受けた時点で、SwiftVLC内部の `videoTracks` が更新済みとは限らない
-  /// （`play(url:)` は一度空にする）ので、読む直前に `refreshTracks()` で読み直す。
-  private func refreshVideoSummary(trigger: String) {
-    guard let player else { return }
-    player.refreshTracks()
-    let tracks = player.videoTracks
-    let summary =
-      tracks.isEmpty
-      ? "なし"
-      : tracks.map { track in
-        let codec = track.codecString ?? "?"
-        let width = track.width.map(String.init) ?? "?"
-        let height = track.height.map(String.init) ?? "?"
-        let fps = track.frameRate.map { String(format: "%.2f", $0) } ?? "?"
-        return "\(track.isSelected ? "*" : "")\(codec) \(width)x\(height) \(fps)fps"
-      }.joined(separator: " / ")
-    guard summary != videoSummary else { return }
-    videoSummary = summary
-    AppLog.write("映像 トラック \(summary) 契機=\(trigger)")
   }
 
   // MARK: - 先行切り替え
@@ -450,34 +419,10 @@ final class PlayerModel {
 
   func attachPiP(_ controller: PiPController?) {
     pipTask?.cancel()
-    possibleTask?.cancel()
-    continuityTask?.cancel()
     pip = controller
     diagnostics.pipActive = controller?.isActive ?? false
     guard let controller else { return }
     AppLog.write("PiPController 取得 isPossible=\(controller.isPossible)")
-    // 暫定: 動画を開き直すまでPiPが使えなくなる現象（自動PiPが起動しない）の切り分け用。
-    // 可否が変わった時刻を残す。対策の効果を確かめた後の別PRで、配線ごと消す。
-    possibleTask = Task { [weak self, weak controller] in
-      var last = controller?.isPossible
-      while !Task.isCancelled {
-        try? await Task.sleep(for: .milliseconds(500))
-        guard let self, let controller else { return }
-        if controller.isPossible != last {
-          last = controller.isPossible
-          AppLog.write(
-            "PiP可 変化 isPossible=\(controller.isPossible) \(self.stateDescription) 映像=\(self.videoSummary)")
-        }
-      }
-    }
-    // `self` を捕まえない（ログを書くだけ）。
-    continuityTask = Task {
-      for await event in controller.pipContinuityEvents {
-        AppLog.write(
-          "PiP継続 \(event.outcome) 経過=\(event.elapsed) 前世代=\(event.previousMediaGeneration) "
-            + "後世代=\(event.mediaGeneration) 制御世代=\(event.controllerGeneration)")
-      }
-    }
     pipTask = Task { [weak self] in
       for await envelope in controller.pipEventEnvelopes {
         guard let self else { return }
@@ -525,8 +470,7 @@ final class PlayerModel {
     // 既定の events は .newest(64) で取りこぼし得るので、必要な種類だけを通す unbounded にする。
     let envelopes = player.eventEnvelopes(policy: .unbounded) { envelope in
       switch envelope.event {
-      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError, .seekableChanged, .endReached,
-        .tracksChanged: true
+      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError, .seekableChanged, .endReached: true
       default: false
       }
     }
@@ -572,10 +516,6 @@ final class PlayerModel {
       onEnded?(currentIdentity)
     case .voutChanged(let count):
       AppLog.write("voutChanged \(count)")
-      if count > 0 { refreshVideoSummary(trigger: "voutChanged") }
-    case .tracksChanged:
-      // 音声の選択変更（`restartAudioOutput()` など）でも届くが、同じ要約はログに出ない。
-      refreshVideoSummary(trigger: "tracksChanged")
     case .encounteredError:
       diagnostics.reportError("encounteredError")
     default:
