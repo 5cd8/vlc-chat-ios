@@ -52,6 +52,13 @@ struct DiagnosticsView: View {
           line("再生位置の記憶", "\(app.resume.count)件")
           line("直近のエラー", diagnostics.lastError ?? "なし")
           line("バージョン", diagnostics.versionText)
+          // 暫定の診断（Issue #12 第2段階）。原因と対策が決まったら消す。
+          Text("PiP実験（暫定）").font(.headline).padding(.top, 8)
+          ForEach(PiPExperiment.allCases) { experiment in
+            Button(experiment.title) { app.runPiPExperiment(experiment) }
+              .buttonStyle(.bordered)
+              .disabled(app.isExperimentRunning || (experiment != .measure && model.title == nil))
+          }
         }
         .font(.caption.monospaced())
         .frame(maxWidth: .infinity, alignment: .leading)

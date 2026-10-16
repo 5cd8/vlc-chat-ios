@@ -27,6 +27,12 @@ final class AppModel {
   private let audioSession: AudioSessionController
   private let relay: NavigationRelay
 
+  /// 暫定の診断（Issue #12 第2段階）。`PlayerScreen` が `PiPVideoView` の `.id` に使い、
+  /// 値を替えるとビューが作り直され、`PiPController` が作り直される（描画面は引き継がれる）。
+  private(set) var pipViewID = UUID()
+  /// 実験の実行中は、診断シートのボタンを押せなくする（取り消しの順序を考えなくて済むように）。
+  private(set) var isExperimentRunning = false
+
   /// 利用者に知らせる通知の待ち行列（動画を開けなかった理由は `playback.openError` が別に持つ）。
   private(set) var notices: [String] = []
 
@@ -91,6 +97,50 @@ final class AppModel {
     let unique = names.filter { seen.insert($0).inserted }
     guard !unique.isEmpty else { return }
     notices.append("\(prefix): \(unique.joined(separator: ", "))")
+  }
+
+  // MARK: - PiPの実験（暫定）
+
+  /// 切り替えの後に `isPossible` が偽のとき、何で真に戻るかを試す（Issue #12 第2段階）。
+  /// 操作の完了から2秒後の状態をログに残す。原因と対策が決まったら消す。
+  func runPiPExperiment(_ experiment: PiPExperiment) {
+    guard !isExperimentRunning else { return }
+    isExperimentRunning = true
+    let title = experiment.title
+    AppLog.write("実験 \(title) 開始 \(playback.pipProbe)")
+    Task {
+      defer { isExperimentRunning = false }
+      switch experiment {
+      case .pauseResume:
+        guard playback.isPlaybackRequestedActive else {
+          AppLog.write("実験 \(title) 対象外（再生中でない）")
+          return
+        }
+        playback.pause()
+        // 取り消されても、一時停止のまま残さない。
+        try? await Task.sleep(for: .milliseconds(500))
+        playback.play()
+      case .reopenCurrent:
+        guard let index = playlist.playlist.currentIndex else {
+          AppLog.write("実験 \(title) 対象なし")
+          return
+        }
+        guard playItem(at: index, byUser: false) else {
+          AppLog.write("実験 \(title) 失敗（開き直せなかった）")
+          return
+        }
+      case .recreateController:
+        pipViewID = UUID()
+      case .measure:
+        break
+      }
+      do {
+        try await Task.sleep(for: .seconds(2))
+      } catch {
+        return
+      }
+      AppLog.write("実験 \(title) 2秒後 \(playback.pipProbe)")
+    }
   }
 
   // MARK: - 選択の振り分け

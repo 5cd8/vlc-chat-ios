@@ -50,6 +50,9 @@ final class PlayerModel {
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
   @ObservationIgnored private var possibleTask: Task<Void, Never>?
+  /// 暫定の診断（Issue #12 第2段階）。差し替えのたびに、SwiftVLCがPiPを保てたか（restored）、
+  /// 保てなかったか（timedOut）を残す。原因と対策が決まったら、配線ごと消す。
+  @ObservationIgnored private var continuityTask: Task<Void, Never>?
   /// 中断・経路の消失の後は、音声出力が無音のまま残る（M1実機）。次に再生が始まるとき作り直す。
   @ObservationIgnored private var needsAudioRestart = false
   /// 中断の開始で、こちらが一時停止した。終了時に `shouldResume` なら再開する。
@@ -393,6 +396,7 @@ final class PlayerModel {
   func attachPiP(_ controller: PiPController?) {
     pipTask?.cancel()
     possibleTask?.cancel()
+    continuityTask?.cancel()
     pip = controller
     diagnostics.pipActive = controller?.isActive ?? false
     guard let controller else { return }
@@ -411,6 +415,14 @@ final class PlayerModel {
         }
       }
     }
+    // `self` を捕まえない（ログを書くだけ）。
+    continuityTask = Task {
+      for await event in controller.pipContinuityEvents {
+        AppLog.write(
+          "PiP継続 \(event.outcome) 経過=\(event.elapsed) 前世代=\(event.previousMediaGeneration) "
+            + "後世代=\(event.mediaGeneration) 制御世代=\(event.controllerGeneration)")
+      }
+    }
     pipTask = Task { [weak self] in
       for await envelope in controller.pipEventEnvelopes {
         guard let self else { return }
@@ -419,6 +431,11 @@ final class PlayerModel {
         self.diagnostics.pipActive = controller.isActive
       }
     }
+  }
+
+  /// 実験ボタンの前後に残す、PiPの可否と再生の状態（Issue #12 第2段階の暫定の診断）。
+  var pipProbe: String {
+    "isPossible=\(pip?.isPossible ?? false) isActive=\(pip?.isActive ?? false) \(stateDescription) 映像=\(videoSummary)"
   }
 
   func startPiP() {

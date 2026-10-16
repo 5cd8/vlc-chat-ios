@@ -62,6 +62,8 @@ struct PlayerScreen: View {
       // 自動PiPの設定が反映されない。自動PiP（startsAutomaticallyFromInline）は既定のtrueのまま。
       if let player = model.player {
         PiPVideoView(player, controller: $pip)
+          // 暫定の診断。値が替わると作り直される（Issue #12 第2段階）。
+          .id(app.pipViewID)
       }
       if let error = model.setupError {
         Text(error).foregroundStyle(.white).padding()
