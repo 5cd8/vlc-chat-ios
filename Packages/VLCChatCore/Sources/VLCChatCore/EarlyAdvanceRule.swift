@@ -19,4 +19,10 @@ public enum EarlyAdvanceRule {
     let remaining = duration - position
     return remaining >= 0 && remaining <= marginSeconds * rate && position >= minimumPlayed
   }
+
+  /// 先行切り替えの後に手前へシークして終端が遠ざかったか（印を下ろして再び先行できるようにする）。
+  /// 閾値の2倍を超えて離れたときだけ真にし、閾値の付近での揺れで再発火しないようにする。
+  public static func shouldRearm(position: TimeInterval, duration: TimeInterval, rate: Double) -> Bool {
+    duration - position > marginSeconds * rate * 2
+  }
 }

@@ -97,7 +97,8 @@ final class PlayerModel {
     earlyAdvanceTask = Task { [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(for: .milliseconds(50))
-        self?.checkEarlyAdvance()
+        guard let self else { return }
+        self.checkEarlyAdvance()
       }
     }
   }
@@ -311,7 +312,7 @@ final class PlayerModel {
     let position = clock.position(at: at)
     let remaining = duration - position
     // シークで戻ったときの再発火のため。この判定は発火済みの条件より先に置く。
-    if earlyAdvanceFired, remaining > EarlyAdvanceRule.marginSeconds * clock.rate * 2 {
+    if earlyAdvanceFired, EarlyAdvanceRule.shouldRearm(position: position, duration: duration, rate: clock.rate) {
       earlyAdvanceFired = false
       hasReachedEnd = false
     }

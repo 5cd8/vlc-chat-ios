@@ -285,7 +285,11 @@ final class AppModel {
         AppLog.write("PiP回復 失敗")
         return
       }
-      try? await Task.sleep(for: .seconds(2))
+      do {
+        try await Task.sleep(for: .seconds(2))
+      } catch {
+        return
+      }
       AppLog.write("PiP回復 結果 \(self.playback.pipStatusText)")
     }
   }
@@ -333,7 +337,8 @@ final class AppModel {
   }
 
   /// PiP中、終端の手前で次へ進む。開ける項目が無くても通知も停止もしない（動画はそのまま終端まで再生され、
-  /// 終端の `handlePlaybackEnded` が従来どおり扱う）。
+  /// 終端の `handlePlaybackEnded` が従来どおり扱う）。ただし開くこと自体に失敗した場合は、
+  /// 手動の切り替えと同じく `openError` のアラートが出る。
   func handleEarlyAdvance(_ identity: VideoIdentity?) {
     resume.remove(identity)
     advance(stopsWhenNone: false, silent: true) { self.playlist.nextStep(excluding: $0) }
