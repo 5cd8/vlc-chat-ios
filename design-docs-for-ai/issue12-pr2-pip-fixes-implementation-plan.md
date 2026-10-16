@@ -39,23 +39,23 @@ PRは `Closes #12`（症状1・2とも対策が入るため）。実機で直ら
     }
 
 - `duration` が nil または 0 以下 → 偽。`rate <= 0` → 偽。
-- 残り（`duration - position`）が 0 以上 かつ `marginSeconds * rate` 以下 かつ `position >= minimumPlayed` → 真。残りが負（長さを超えた）なら偽（`endReached` に任せる）。
+- 残り（`duration - position`）が 0 以上 かつ `marginSeconds * rate` 以下 かつ `position >= minimumPlayed` → 真。残りが負なら偽（純粋な関数としての規則。実際には `PlaybackClock.position(at:)` が長さで切り詰めるので、補間が長さを超えると残りは0で真になる）。
 
-テスト（`EarlyAdvanceRuleTests.swift`。手計算）：長さ100・rate 1・margin 0.5 で、position 99.4 → 偽（残り0.6）、99.5 → 真（残り0.5＝境界）、99.9 → 真、100.1 → 偽（残り負）。rate 2 → 閾値1.0（position 98.9 → 偽、99.0 → 真）。長さ nil／0 → 偽。rate 0 → 偽。position 0.5・長さ1.2 → 偽（minimumPlayed 未満）。
+テスト（`EarlyAdvanceRuleTests.swift`。手計算）：長さ100・rate 1・margin 0.5 で、position 99.4 → 偽（残り0.6）、99.5 → 真（残り0.5＝境界）、99.9 → 真、100.1 → 偽（残り負）。rate 2 → 閾値1.0（position 98.9 → 偽、99.0 → 真）。長さ nil／0 → 偽。rate 0 → 偽。**最小再生時間**：position 0.8・長さ1.2（残り0.4＝閾値の内側）→ 偽、position 1.0・長さ1.4（残り0.4）→ 真（`minimumPlayed` だけが結果を分ける対）。テストは `Packages/VLCChatCore/Tests/VLCChatCoreTests/EarlyAdvanceRuleTests.swift`（Swift Testing の `@Test`／`#expect`。`ResumeRulesTests.swift` と同じ書式）。
 
 ### 2.2 `PlayerModel`：先行切り替えの検知と、不可のときの判定
-1. **先行切り替え**：`@ObservationIgnored var earlyAdvanceEnabled: (() -> Bool)?`、`@ObservationIgnored var onEarlyAdvance: ((VideoIdentity?) -> Void)?`、`private var earlyAdvanceFired = false`（`open` の成功時の初期化で偽に戻す）、`@ObservationIgnored private var earlyAdvanceTask: Task<Void, Never>?`（`init` で起動。`recordTask` と同じ作り）。0.1秒ごとに、次がすべて真なら発火する：`clock.mode == .playing`、`pip?.isActive == true`、`!earlyAdvanceFired`、`earlyAdvanceEnabled?() == true`、`EarlyAdvanceRule.shouldAdvance(position: clock.position(at: now), duration: duration, rate: clock.rate)`。発火したら、`earlyAdvanceFired = true`、`hasReachedEnd = true`（`open` 冒頭の `recordPosition()` が終端の位置を記録し直さないため。`open` の成功時に偽に戻る）、`AppLog.write("先行切り替え 残り=\(String(format: "%.2f", duration - position))s \(title ?? "-")")`、`onEarlyAdvance?(currentIdentity)` の順。
-2. **不可のときの判定**：`func pipUnavailableAfterSettling() -> Bool`＝`pip != nil`、`pip?.isActive == false`、`pip?.isPossible == false`、`clock.mode == .playing`（再生中でなければ偽。一時停止中は開き直さない）。
-3. **暫定の診断を消す**：`pipProbe` を削除する。`continuityTask`（継続イベントのログ）は**残す**（対策の効果を実機で確かめるため。コメントを「対策の確認用。不要になれば消す」に直す）。
+1. **先行切り替え**：`@ObservationIgnored var earlyAdvanceEnabled: (() -> Bool)?`、`@ObservationIgnored var onEarlyAdvance: ((VideoIdentity?) -> Void)?`、`@ObservationIgnored private var earlyAdvanceFired = false`（`open` の成功時の初期化で偽に戻す。先行切り替えで次を開けなかったあと、手前へシークし直して終端が遠ざかった場合に備え、発火済みで残りが閾値の2倍を超えたら偽に戻す）、`@ObservationIgnored private var earlyAdvanceTask: Task<Void, Never>?`（`init` で起動。`recordTask` と同じ作り）。0.1秒ごとに（`clock.mode` と `pip?.isActive` の確認を最初に行い、PiPでないときの負荷を小さくする）、次がすべて真なら発火する：`clock.mode == .playing`、`pip?.isActive == true`、`!earlyAdvanceFired`、`earlyAdvanceEnabled?() == true`、`EarlyAdvanceRule.shouldAdvance(position: clock.position(at: now), duration: duration, rate: clock.rate)`。発火したら、`earlyAdvanceFired = true`、`hasReachedEnd = true`（`open` 冒頭の `recordPosition()` が終端の位置を記録し直さないため。`open` の成功時に偽に戻る）、`AppLog.write("先行切り替え 残り=\(String(format: "%.2f", remaining / clock.rate))s（実時間） \(title ?? "-")")`（`remaining = duration - position`。`duration` は Optional なので、`rule` を通った後にアンラップして使う）、`onEarlyAdvance?(currentIdentity)` の順。
+2. **開き直しが要るかの判定**：`func needsPiPRecovery() -> Bool`＝`pip != nil`、`pip?.isActive == false`、`pip?.isPossible == false`、`player?.state == .playing`（`clock.mode` は opening／buffering で変わらないので、準備中の動画で誤判定しない。一時停止中も偽）、`diagnostics.scenePhaseName == "active"`（背面での開き直しは、自動PiPが起動しないまま音声だけになるので行わない）。ログ用に `var pipStatusText: String`＝`"isPossible=… isActive=… \(stateDescription)"`（`pipProbe` の代わり。映像の要約は含めない）。
+3. **暫定の診断**：`pipProbe` は削除する（`pipStatusText` に置き換える）。`continuityTask`（継続イベントのログ）、`possibleTask`（`PiP可 変化` のログ）、`videoSummary`／`refreshVideoSummary`（映像トラックのログ）は、対策の効果を実機のログで読むために**このPRでは残す**。コメントを「対策が実機で確かめられたら消す（別のPR）」に直す（00 項目27）。
 
 ### 2.3 `AppModel`
 1. 配線（`init`）：`playback.earlyAdvanceEnabled = { [playlist, settings] in settings.autoAdvance && playlist.playlist.hasNext }`、`playback.onEarlyAdvance = { [relay] identity in relay.model?.handleEarlyAdvance(identity) }`。
-2. `func handleEarlyAdvance(_ identity: VideoIdentity?)`：`resume.remove(identity)`（最後まで再生した扱い）→ `advance(stopsWhenNone: false) { self.playlist.nextStep(excluding: $0) }`（手で押した「次へ」と同じ経路。PiP中の差し替えは `PiP継続` で保たれる。開ける項目が無ければ何もせず、`endReached` に任せる）。
+2. `func handleEarlyAdvance(_ identity: VideoIdentity?)`：`resume.remove(identity)`（最後まで再生した扱い）→ 次の項目へ進む（手で押した「次へ」と同じ経路で、PiP中の差し替えは `PiP継続` で保たれる）。**`advance` に `silent: Bool` を足し、先行切り替えでは `silent: true`**：開ける項目が無い（`target == nil`）ときは、通知も停止もせず何もしない。通知を出すと、0.5秒後に届く `endReached`（`handlePlaybackEnded`）の `advance` と合わせて、同じ通知が2回出る。開こうとして失敗した項目は、`excluded` に溜めて次を探す（今の `advance` と同じ）。二重に次へ進まない根拠：`playItem` → `open` で、SwiftVLCが再生の世代を同期的に進めるため、古い動画の `endReached` は `PlayerModel.handle` の世代の照合で捨てられる。
 3. **開き直し**：`playItem(at:byUser:)` に引数 `isPiPRecovery: Bool = false` を足す。成功したら（`return true` の直前）、`!isPiPRecovery` のときだけ `schedulePiPRecovery(index:)`。
-   - `@ObservationIgnored private var pipRecoveryTask: Task<Void, Never>?`。`schedulePiPRecovery` は前のタスクを `cancel()` して、新しい `Task { }`（メインアクター）を作る：`do { try await Task.sleep(for: .seconds(1.5)) } catch { return }` → `guard playlist.playlist.currentIndex == index, playback.pipUnavailableAfterSettling() else { return }` → `AppLog.write("PiP回復 開き直し …")` → `playItem(at: index, byUser: false, isPiPRecovery: true)`。1.5秒は、実機ログで不可が出るまでの時間（0.2〜0.6秒）に余裕を足した値。
+   - 引数は添字ではなく**項目のID**（`entryID: UUID`）：1.5秒の間にプレイリスト画面で並べ替え・削除が起きても、添字がずれて別の動画を開き直さないため。`@ObservationIgnored private var pipRecoveryTask: Task<Void, Never>?`。`schedulePiPRecovery(entryID:)` は前のタスクを `cancel()` して、新しい `Task { }`（メインアクター）を作る：`do { try await Task.sleep(for: .seconds(1.5)) } catch { return }` → `guard playlist.playlist.currentID == entryID, let index = playlist.playlist.entries.firstIndex(where: { $0.id == entryID }), playback.needsPiPRecovery() else { return }` → `AppLog.write("PiP回復 開き直し \(playback.pipStatusText)")` → `playItem(at: index, byUser: false, isPiPRecovery: true)`（`false` が返ったら `PiP回復 失敗（開き直せなかった）` をログに残す）。1.5秒は、実機ログで不可が出るまでの時間（0.2〜0.6秒）に余裕を足した値。
    - 手でまた切り替えたとき（`playItem` の再呼び出し）は、`schedulePiPRecovery` が前のタスクを取り消すので、古い動画を開き直さない。
-   - **開き直しは1回だけ**（`isPiPRecovery: true` の `playItem` は、次の開き直しを予約しない）。開き直しの2秒後に `playback.pipUnavailableAfterSettling()` を調べて、ログに結果を残す（`PiP回復 結果 …`）。
-4. 暫定の診断を消す：`pipViewID`、`isExperimentRunning`、`runPiPExperiment`、`PiPExperiment.swift`、`DiagnosticsView` の実験ボタン、`PlayerScreen` の `.id(app.pipViewID)` を削除する。
+   - **開き直しは1回だけ**（`isPiPRecovery: true` の `playItem` は、次の開き直しを予約しない）。開き直しの2秒後に `AppLog.write("PiP回復 結果 \(playback.pipStatusText)")` を残す（`isPossible` が真に戻ったかを、ログの値で読めるようにする）。
+4. 実験の暫定の診断を消す：`pipViewID`、`isExperimentRunning`、`runPiPExperiment`、`PiPExperiment.swift`、`DiagnosticsView` の実験ボタン、`PlayerScreen` の `.id(app.pipViewID)` を削除する。
 
 ## 3. 設計判断
 
@@ -64,21 +64,26 @@ PRは `Closes #12`（症状1・2とも対策が入るため）。実機で直ら
 | 先行切り替えはPiP中だけ | PiPでないときは、今までどおり最後まで再生して次へ進む（最後の0.5秒を削らない） | 常に先行する（PiPでない通常の再生で、最後を削る） |
 | 先行は残り0.5秒（実時間）、0.1秒間隔で検知 | ユーザーの要望（約1秒をもっと短く）。0.1秒間隔なので、最悪でも残り0.4秒で発火する。`timeChanged` の通知（約0.26秒）ではなく、補間した時計で見る。値はログ（`先行切り替え 残り=`）で実機で削れるか確かめる | 1秒（長い）。通知で検知（0.26秒の粗さで取りこぼす） |
 | 開き直しの契機 | 切り替え後1.5秒の時点で `isPossible` が偽（PiP非表示・再生中）なら1回だけ | 常に開き直す（H.264でも映像が途切れる）。PiPボタンを押したときだけ（自動PiPに効かない。ユーザー確定の(a)ではない） |
+| 先行切り替えの後始末を `nextItem()` と別にする（`silent`） | 開ける項目が無いとき、`endReached` との二重の通知を避ける | `nextItem()` をそのまま呼ぶ（通知とエラーが2回出る） |
+| 先行切り替えの検知ループを常時回す | `clock.mode` と `pip?.isActive` の確認を最初にして、PiPでないときの負荷を小さくする。PiP表示の開始・終了で起動・停止する作りにすると、状態の管理が増える | PiP表示中だけ回す（状態管理が増える） |
 | 継続イベントのログを残す | 対策が効いたかを実機のログで確かめるため | 消す（確認できない） |
 
 ## 4. 品質管理・動作確認
 
 - CIの `test`・`build` が成功すること。アプリのコードに起因する警告は残さない。`swift test` に `EarlyAdvanceRuleTests` が入ること。
 - **実機確認（ユーザーの作業）**：
-  1. **症状1**：PiPを出した状態で、短い動画を最後まで再生して自動進行する。ログに `先行切り替え 残り=…s` → `PiP継続 rebuilding → restored` が出て、PiPが保たれる。`残り=` が0.5秒前後か（削れるか）を記録する。最後まで再生した動画の記憶が消えている（先頭から再生される）。
+  1. **症状1**：PiPを出した状態で、短い動画を最後まで再生して自動進行する。ログに `先行切り替え 残り=…s` → `PiP継続 rebuilding → restored` が出て、PiPが保たれる。`残り=` が0.5秒前後か（削れるか）を記録する。最後まで再生した動画の記憶が消えている（診断シートの「再生位置の記憶 N件」が1件減る。終端付近の記録は、削除しなくても30秒の規則で先頭から再生されるので、再生位置では確かめられない）。
   2. **症状1の非PiP**：PiPなしの自動進行は、今までどおり最後まで再生してから次へ進む（`先行切り替え` が出ない）。
   3. **症状2**：PiPなしで、H.264 → VP9／AV1 の動画（mkv_vp9_4k_10min、遊戯王）へ「次へ」「前へ」で切り替える。不可になったときは、約1.5秒後に `PiP回復 開き直し` が出て、`isPossible=true` に戻る。ホームへ戻って自動PiPが開始する。
-  4. 不可にならない動画（H.264）では、`PiP回復` が出ない。一時停止中は開き直さない。
+  4. 不可にならない動画（H.264）では、`PiP回復` が出ない。一時停止中は開き直さない（不可になる動画に切り替えた直後の1.5秒以内に一時停止して確かめる）。切り替えの直後にホームへ戻ると、開き直さない（背面では行わない）。
   5. ログ（診断→ログを共有）を共有する。
 - 直らない場合は、`先行切り替え` の残りと `PiP継続` を見て、閾値か契機を調整する。
 
 ## 5. リスク
 
 - 動画の `duration`（libVLCの長さ）が実際の終端より長いと、先行の発火前に終端で映像出力が壊れる（従来どおりPiPが止まる）。ログの `先行切り替え` が出ない動画は、`duration` の誤差を疑う。
+- 先行切り替えが開ける項目を見つけられず失敗した場合、`endReached` で再び試す。開こうとして失敗する項目が続くと、開けないエラーが（先行と終端で）2回出ることがある。
+- 停止または詰まり（buffering）で補間が先走ると、先行切り替えが早めに発火し得る（補間した時計で見るため）。
+- 開き直しは `playItem` を通るので、チャットを読み直し（`chat.reset`／`load`）、`openCount` が増える（ドラッグ中のシークが解除される）。チャットのブックマークが解決できない項目では、通知「チャットを開けませんでした」が再び出る。許容する。
 - 開き直しで映像が約0.5秒途切れる（VP9・AV1への切り替えで、よく起きる）。ユーザー確定の挙動。
 - 開き直しは再生位置を復元する（`resumeLookup`）。直前の位置の記録は `open` 冒頭の `recordPosition()` が行うので、位置はほぼ変わらない（約1.5秒より前の動画では先頭付近に戻る）。
