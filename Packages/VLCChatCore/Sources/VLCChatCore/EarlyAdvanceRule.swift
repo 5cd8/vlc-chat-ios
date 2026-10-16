@@ -6,8 +6,8 @@ import Foundation
 /// （映像出力が壊れた後の差し替えは、SwiftVLCがPiPを保つ対象外）。再生の途中の差し替えなら保たれるので、
 /// 終端の手前で次へ進む。
 public enum EarlyAdvanceRule {
-  /// 終わりまで残りこの実時間（秒）になったら、先行して次へ進む。値は実機の `先行切り替え 残り=` のログで、
-  /// 削れるか確かめる。
+  /// 終わりまで残りこの実時間（秒）になったら、先行して次へ進む。実機（iPhone 16）では、0.5秒で4/4、
+  /// 0.3秒で5/5、PiPが保たれた。これ以上縮めても得られるのは終端の0.1秒ほどなので、0.3秒で確定する。
   public static let marginSeconds: TimeInterval = 0.3
   /// 再生が始まってすぐの誤発火を防ぐ。
   public static let minimumPlayed: TimeInterval = 1.0
