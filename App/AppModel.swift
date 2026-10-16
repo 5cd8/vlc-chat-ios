@@ -251,15 +251,17 @@ final class AppModel {
   // MARK: - 自動進行・前へ・次へ
 
   func nextItem() {
-    advance { self.playlist.nextStep(excluding: $0) }
+    advance(stopsWhenNone: false) { self.playlist.nextStep(excluding: $0) }
   }
 
   func previousItem() {
-    advance { self.playlist.previousStep(excluding: $0) }
+    advance(stopsWhenNone: false) { self.playlist.previousStep(excluding: $0) }
   }
 
   /// 有効な項目が見つかるまで探す。開けなかった項目は `excluded` に溜めて再探索する。
-  private func advance(_ step: (Set<UUID>) -> Playlist.Step) {
+  /// 有効な項目が無いとき、手で押した前へ・次へは再生中の動画を止めない（ユーザー確定）。
+  /// 最後まで再生した後の自動進行は、もう再生が終わっているので停止状態にする。
+  private func advance(stopsWhenNone: Bool, _ step: (Set<UUID>) -> Playlist.Step) {
     var excluded = Set<UUID>()
     while true {
       let result = step(excluded)
@@ -267,7 +269,7 @@ final class AppModel {
       guard let target = result.target else {
         // 有効な項目が無ければ停止する（動画は閉じない）。端の項目で押したときは何もしない。
         if !result.skipped.isEmpty {
-          playback.stopKeepingTitle()
+          if stopsWhenNone { playback.stopKeepingTitle() }
           notify("開けない項目を飛ばしました", names: skippedNames)
           notices.append("再生できる項目がありません")
         }
@@ -285,7 +287,7 @@ final class AppModel {
   func handlePlaybackEnded(_ identity: VideoIdentity?) {
     resume.remove(identity)
     guard settings.autoAdvance, playlist.playlist.hasNext else { return }
-    nextItem()
+    advance(stopsWhenNone: true) { self.playlist.nextStep(excluding: $0) }
   }
 
   // MARK: - プレイリスト画面の操作

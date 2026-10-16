@@ -6,9 +6,6 @@ struct PlaylistView: View {
   let app: AppModel
   @Environment(\.dismiss) private var dismiss
   @Environment(\.scenePhase) private var scenePhase
-  // EditButton が切り替える値は NavigationStack の内側の環境に入るので、外側のこのビューでは読めない。
-  // 自前の状態を NavigationStack に渡し、行のタップでも読む。
-  @State private var editMode = EditMode.inactive
 
   private enum ImportPurpose {
     case append
@@ -50,8 +47,6 @@ struct PlaylistView: View {
         }
       }
     }
-    // ツールバーの EditButton も同じ値を切り替えるよう、NavigationStack 全体に渡す。
-    .environment(\.editMode, $editMode)
     .fileImporter(
       isPresented: $showsImporter, allowedContentTypes: importTypes, allowsMultipleSelection: allowsMultiple
     ) { result in
@@ -118,18 +113,33 @@ struct PlaylistView: View {
       .accessibilityLabel("チャットを割り当て")
       .accessibilityValue(entry.chatFileName ?? "なし")
     }
-    .contentShape(Rectangle())
-    .onTapGesture {
-      // 並べ替えの最中に行をタップしても再生を始めない。
-      guard !editMode.isEditing else { return }
-      guard let index = app.playlist.playlist.entries.firstIndex(where: { $0.id == entry.id }) else { return }
-      app.playItem(at: index, byUser: true)
-    }
+    .modifier(
+      PlayOnTap {
+        guard let index = app.playlist.playlist.entries.firstIndex(where: { $0.id == entry.id }) else { return }
+        app.playItem(at: index, byUser: true)
+      })
     .listRowBackground(isCurrent ? Color.accentColor.opacity(0.15) : nil)
   }
 
   private func chatColor(_ entry: PlaylistEntry, _ validity: PlaylistModel.EntryValidity?) -> Color {
     guard entry.chatBookmark != nil else { return .secondary.opacity(0.4) }
     return validity?.chat == false ? .orange : .accentColor
+  }
+}
+
+/// 行のタップで再生する。編集モードの値は List の行の内側でしか正しく読めないので、行に付けるここで読む。
+/// 自前の編集状態を持って NavigationStack に渡す方式は、編集に入れなくなる不具合を起こした（M3実機）。
+private struct PlayOnTap: ViewModifier {
+  @Environment(\.editMode) private var editMode
+  let action: () -> Void
+
+  func body(content: Content) -> some View {
+    content
+      .contentShape(Rectangle())
+      .onTapGesture {
+        // 並べ替えの最中に行をタップしても再生を始めない。
+        guard editMode?.wrappedValue.isEditing != true else { return }
+        action()
+      }
   }
 }
