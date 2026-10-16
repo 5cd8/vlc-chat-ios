@@ -281,16 +281,9 @@ final class AppModel {
       }
       guard let index = self.playlist.playlist.entries.firstIndex(where: { $0.id == entryID }) else { return }
       AppLog.write("PiP回復 開き直し \(self.playback.pipStatusText)")
-      guard self.playItem(at: index, byUser: false, isPiPRecovery: true) else {
+      if !self.playItem(at: index, byUser: false, isPiPRecovery: true) {
         AppLog.write("PiP回復 失敗")
-        return
       }
-      do {
-        try await Task.sleep(for: .seconds(2))
-      } catch {
-        return
-      }
-      AppLog.write("PiP回復 結果 \(self.playback.pipStatusText)")
     }
   }
 
