@@ -2,7 +2,7 @@
 
 対象Issue: https://github.com/5cd8/vlc-chat-ios/issues/12 （アシスタントが起票したIssue。要件の情報源はIssue本文とコメントであり、本計画は要約・言い換えをしない。**本文の「段階的な進め方」と「第2段階の確定事項」「第2段階の最初のPR（案）」を実装の根拠にする**）
 前提: 第1段階（PR #15、`main` の `613cd69`）が `main` に入っていること。
-スコープ: ①`pipContinuityEvents` の購読とログ ②診断シートの暫定の実験ボタン（一時停止→再開、同じ動画を開き直す、PiPの描画面を作り直す、今の `isPossible` を測る）と、押した2秒後の結果のログ。**対策そのものは入れない**（原因が分かってから別のPRで行う）。非ゴール: PiPが不可になる原因の修正、自動進行でPiPを保つ修正（次のPR）、README・CONTEXT.mdの変更。
+スコープ: ①`pipContinuityEvents` の購読とログ ②診断シートの暫定の実験ボタン（一時停止→再開、同じ動画を開き直す、PiPControllerを作り直す、今の `isPossible` を測る）と、押した2秒後の結果のログ。**対策そのものは入れない**（原因が分かってから別のPRで行う）。非ゴール: PiPが不可になる原因の修正、自動進行でPiPを保つ修正（次のPR）、README・CONTEXT.mdの変更。
 PRは `Refs #12`（`Closes` にしない）。
 依頼プロンプト: `user-prompt/202610161700_issue12_phase2_pr1.md`（git管理しない）
 作業ブランチ: `feature/issue-12-pip-experiments`（`origin/main` から切る）
