@@ -6,6 +6,7 @@ struct PlaylistView: View {
   let app: AppModel
   @Environment(\.dismiss) private var dismiss
   @Environment(\.scenePhase) private var scenePhase
+  @Environment(\.editMode) private var editMode
 
   private enum ImportPurpose {
     case append
@@ -115,6 +116,8 @@ struct PlaylistView: View {
     }
     .contentShape(Rectangle())
     .onTapGesture {
+      // 並べ替えの最中に行をタップしても再生を始めない。
+      guard editMode?.wrappedValue.isEditing != true else { return }
       guard let index = app.playlist.playlist.entries.firstIndex(where: { $0.id == entry.id }) else { return }
       app.playItem(at: index, byUser: true)
     }

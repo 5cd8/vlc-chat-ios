@@ -471,6 +471,9 @@ final class PlayerModel {
     // 状態の変化がアプリの操作かPiP側の操作かを、ログから切り分けられるようPiPの有無を添える。
     AppLog.write("状態 \(state) PiP=\(pip?.isActive == true ? "表示中" : "なし")")
     UIApplication.shared.isIdleTimerDisabled = (state == .playing)
+    // 再生中に差し替えると、`open` の時点で立てた `playingSince` が本当の再生開始より早い。
+    // 開くのに時間がかかる動画で復元待ちの5秒を使い切らないよう、開き直しの通知で数え直す。
+    if (state == .opening || state == .stopped) && !restoreCompleted { playingSince = nil }
 
     switch state {
     case .opening, .buffering, .playing:

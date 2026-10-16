@@ -13,7 +13,7 @@ struct LicensesView: View {
         Text(
           "このアプリは libVLC（LGPL-2.1以上、VideoLAN）を静的リンクした SwiftVLC を含みます。"
             + "SwiftVLC が同梱するxcframeworkは、VideoLAN の vlc に SwiftVLC 独自のパッチを当ててビルドしたものです。"
-            + "固定したコミットとパッチは、SwiftVLC の v1.1.0-beta.14 タグの scripts/build-libvlc.sh と scripts/patches/ にあります。")
+            + "固定したコミットとパッチは、SwiftVLC の v\(AppModel.swiftVLCVersion) タグの scripts/build-libvlc.sh と scripts/patches/ にあります。")
         Link("vlc のソース", destination: URL(string: "https://code.videolan.org/videolan/vlc")!)
         Text("再ビルドの手順: このアプリのリポジトリの .github/workflows/build-ipa.yml と scripts/make-ipa.sh")
         Link("https://github.com/5cd8/vlc-chat-ios", destination: URL(string: "https://github.com/5cd8/vlc-chat-ios")!)

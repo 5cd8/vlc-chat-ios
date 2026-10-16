@@ -147,6 +147,7 @@ final class AppModel {
       videos: plan.videos.map { urls[$0] }, chats: plan.pairs.map { $0.map { urls[$0] } })
     reportFailures(result)
     notify("対応する動画が無いチャットを無視しました", names: plan.ignoredChats.map { urls[$0].lastPathComponent })
+    playlist.refreshValidity()
     playback.refreshRemote()
   }
 
@@ -195,7 +196,7 @@ final class AppModel {
       return
     }
     if let id = playlist.playlist.currentID, !playlist.assignChat(entryID: id, url: url) {
-      notices.append("チャットを開けませんでした: \(url.lastPathComponent)")
+      notices.append("チャットの割り当てを保存できませんでした: \(url.lastPathComponent)")
     }
     AppLog.write("選択 チャット \(url.path)")
     chat.load(url: url)
