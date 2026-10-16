@@ -18,7 +18,7 @@
 ### 1. 生成スクリプト `scripts/make-app-icon.py`（新規）
 
 - Pillow で 4096x4096 に描き、`Image.Resampling.LANCZOS` で 1024x1024 に縮小（アンチエイリアス）。RGB で保存（アルファなし。App Store/iOSは透過アイコンを不可とするため）。
-- 出力: `App/Assets.xcassets/AppIcon.appiconset/AppIcon.png`。引数なしで実行、出力先はスクリプト位置からの相対（`Path(__file__).parent.parent`）。
+- 出力: `App/Assets.xcassets/AppIcon.appiconset/AppIcon.png`。引数なしで実行、出力先はスクリプト位置からの相対（`Path(__file__).parent.parent`）。保存前に `out.parent.mkdir(parents=True, exist_ok=True)` で出力フォルダを作る（初回実行はフォルダが無いため）。
 - 座標は1024基準の定数にまとめ、描画時に係数4を掛ける。**図形の数値は下記を初期値とし、実際に描いて見た目で微調整してよい**（微調整後の値をスクリプトに反映すればよく、計画の更新は不要）。
   - 背景: 縦グラデーション（縦1×4096の画像を作って `resize` で横に伸ばす。`putpixel` の全画素ループは遅い）上 `#16346F` → 下 `#0A1A3F`（濃紺）。
   - 再生三角（白 `#FFFFFF`）: 頂点 (330,260)・(330,760)・(790,510) 付近。角は次の手順で丸める（r≈40）: 各辺を内側へ r だけ平行移動した内側の三角形を求める（頂点は角の二等分線上を r/sin(θ/2) 動く）→ その各頂点に半径 r の円を描く → 内側の頂点どうしを幅 2r の線で結ぶ → 内側の三角形を塗る。これで辺は元の三角形と一致し、角だけが丸まる（`ImageDraw.line(joint="curve")` は始点の角が丸まらず外へ広がるため使わない）。重心は (483,510) で、三角は中央よりやや左。
@@ -46,7 +46,7 @@
 
 - `build/verify/Payload/$APP_NAME.app/Assets.car` が存在すること。（`AppIcon60x60@2x.png` がバンドル直下にできるかは、Xcode 26＋単一サイズで確認できていないので必須にしない。失敗時の `ls` で見えるようにするだけ。）
 - `plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw -o - "$plist"` が `AppIcon` であること。**`-o -` を必ず付ける**（無いとplistが抽出結果で上書きされる。既存の検査と同じ書き方）。
-- 検査は `set -e` で途中終了しない形で書く: `if ! icon_name="$(plutil -extract ... raw -o - "$plist" 2>&1)" || [ "$icon_name" != AppIcon ]; then ...; exit 1; fi`。いずれかが失敗したら、`plutil -p "$plist" >&2` と `ls` でplist全体とバンドルの中身をログに出してから `exit 1` する。キーパスが違っていてもCIを1回回せば正しい値が分かる（Macが無くローカルで確かめられないため）。
+- 検査は `set -e` で途中終了しない形で書く: `if ! icon_name="$(plutil -extract ... raw -o - "$plist" 2>&1)" || [ "$icon_name" != AppIcon ]; then ...; exit 1; fi`。いずれかが失敗したら、`echo "CFBundleIconName: $icon_name" >&2`（plutilのエラー文が入っている）、`plutil -p "$plist" >&2`、`ls` でplist全体とバンドルの中身をログに出してから `exit 1` する。キーパスが違っていてもCIを1回回せば正しい値が分かる（Macが無くローカルで確かめられないため）。
 
 ### 5. README
 
@@ -69,7 +69,7 @@
 
 ## 品質管理
 
-- CI（`build-ipa.yml`）が警告0・既存テスト成功・ipa検査OKで通ること。`Assets.xcassets` 追加で actool の警告（例：未使用／サイズ不正）が出ないこと。確認は、成果物 `ipa` に含まれる `build/xcodebuild.log` を `grep -n "warning:"` し、actool／Assets.xcassets 由来の警告が無いことを見る（CI自体には警告で失敗させる仕組みは無い）。
+- CI（`build-ipa.yml`）が警告0・既存テスト成功・ipa検査OKで通ること。`Assets.xcassets` 追加で actool の警告（例：未使用／サイズ不正）が出ないこと。基準は「main直近のCIの `xcodebuild.log` の `warning:` 件数」とし、本PRで件数が増えない（0なら0のまま）こと。確認は、成果物 `ipa` に含まれる `build/xcodebuild.log` を `grep -n "warning:"` し、actool／Assets.xcassets 由来の警告が無いことを見る（CI自体には警告で失敗させる仕組みは無い）。
 - 画像は実際に描いてから見る（`Read` で PNG を開く）。さらに、60x60 程度に縮小したプレビューも作って小さくても判別できるか確認する（00 項目23）。
 
 ## 動作確認の手順
@@ -85,4 +85,5 @@
 3. アセットカタログ JSON、`project.yml`。
 4. `make-ipa.sh` 検査、README。
 5. `feature/**` のpushでCIが走る（`build-ipa.yml` の `on.push.branches`）。pushしてCIを確認する。PR作成はユーザーの指示後。
-6. セルフレビュー3回（00 項目18：追加シンボル参照のgrep、JSONの構文確認（`python -m json.tool <file>`）、CIの再実行で警告確認）。
+6. コミット前に `git diff --cached --stat` で行数を確かめる（新規の `.py`・`Contents.json` がCRLFになっていないか。02 項目10）。
+7. セルフレビュー3回（00 項目18：追加シンボル参照のgrep、JSONの構文確認（`python -m json.tool <file>`）、72行目の `warning:` 件数の確認）。
