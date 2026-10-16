@@ -53,6 +53,14 @@ for ipa in build/vlc-with-chat-unsigned.ipa build/vlc-with-chat-fakesigned.ipa; 
     echo "CFBundleVersion が実行番号($BUILD_NUMBER)でない: $actual ($ipa)" >&2
     exit 1
   fi
+  # アイコンが入っていること。キーパスが違っても、失敗時のログで実際の中身が分かる。
+  if ! icon_name="$(plutil -extract CFBundleIcons.CFBundlePrimaryIcon.CFBundleIconName raw -o - "$plist" 2>&1)"     || [ "$icon_name" != AppIcon ]     || [ ! -f "build/verify/Payload/$APP_NAME.app/Assets.car" ]; then
+    echo "アイコンが入っていない: $ipa" >&2
+    echo "CFBundleIconName: $icon_name" >&2
+    plutil -p "$plist" >&2
+    ls "build/verify/Payload/$APP_NAME.app" >&2
+    exit 1
+  fi
 done
 rm -rf build/verify
 echo "ipa OK: build=$BUILD_NUMBER"
