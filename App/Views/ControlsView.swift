@@ -22,13 +22,19 @@ struct ControlsView: View {
         Button(action: onPrevious) { Image(systemName: "backward.end.fill").font(.title2) }
           .disabled(!playlist.playlist.hasPrevious)
           .accessibilityLabel("前の項目")
-        Button { model.skip(seconds: -10) } label: { Image(systemName: "gobackward.10").font(.title) }
+        Button {
+          releaseStuckScrubbing(reason: "10秒戻り")
+          model.skip(seconds: -10)
+        } label: { Image(systemName: "gobackward.10").font(.title) }
           .accessibilityLabel("10秒戻る")
         Button { model.togglePlayPause() } label: {
           Image(systemName: model.isPlaybackRequestedActive ? "pause.fill" : "play.fill").font(.largeTitle)
         }
         .accessibilityLabel(model.isPlaybackRequestedActive ? "一時停止" : "再生")
-        Button { model.skip(seconds: 10) } label: { Image(systemName: "goforward.10").font(.title) }
+        Button {
+          releaseStuckScrubbing(reason: "10秒送り")
+          model.skip(seconds: 10)
+        } label: { Image(systemName: "goforward.10").font(.title) }
           .accessibilityLabel("10秒進む")
         Button(action: onNext) { Image(systemName: "forward.end.fill").font(.title2) }
           .disabled(!playlist.playlist.hasNext)
@@ -72,11 +78,13 @@ struct ControlsView: View {
         ),
         in: 0...(duration ?? 1)
       ) { editing in
+        // 解除した後に遅れて届いた「離した」通知で、古い位置へシークし直さない。
+        let wasScrubbing = isScrubbing
         isScrubbing = editing
         // つまみを掴んだ瞬間に、現在位置から動き出すようにする。
         if editing { scrubPosition = shownPosition }
         // 離したとき1回だけシークする。
-        if !editing {
+        if !editing, wasScrubbing {
           shownPosition = scrubPosition
           model.seek(toSeconds: scrubPosition)
         }
@@ -94,6 +102,8 @@ struct ControlsView: View {
     // 背面では画面が見えないので回さない（再描画が背面の負荷を押し上げないように）。
     // inactive（コントロールセンターなどを開いている間）は画面が見えるので回す。
     .task(id: scenePhase) {
+      // 画面の最初の表示でも走るが、掴んでいなければ何もしない。
+      releaseStuckScrubbing(reason: "scenePhase")
       guard scenePhase != .background else { return }
       while !Task.isCancelled {
         if !isScrubbing {
@@ -103,7 +113,18 @@ struct ControlsView: View {
       }
     }
     // 動画を開き直したら、つまみを掴んだままの状態が残らないようにする。
-    .onChange(of: model.openCount) { isScrubbing = false }
+    .onChange(of: model.openCount) { releaseStuckScrubbing(reason: "開き直し") }
+  }
+
+  /// 「離した」通知が失われると `isScrubbing` が真のまま残り、時刻の文字とつまみが同時に固まる
+  /// （映像・音声は進む）。M1で実際に起きた。10秒送り・戻りの連打後の固まりも同じ原因と疑っているが未確認。
+  /// 解除は再発の防止ではなく次の操作での復帰なので、働いたときだけログに残し、原因の確認に使う。
+  private func releaseStuckScrubbing(reason: String) {
+    guard isScrubbing else { return }
+    isScrubbing = false
+    AppLog.write(
+      "操作 シークバー 掴んだままを解除 理由=\(reason) 掴んだ位置=\(String(format: "%.1f", scrubPosition))s "
+        + "表示=\(String(format: "%.1f", shownPosition))s \(model.stateDescription)")
   }
 
   static func format(_ seconds: Double) -> String {
