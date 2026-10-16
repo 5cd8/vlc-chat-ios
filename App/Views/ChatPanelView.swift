@@ -15,7 +15,8 @@ struct ChatPanelView: View {
   var body: some View {
     let chat = app.chat
     ZStack {
-      Color.black
+      // 下のセーフエリアにも黒を敷く（一覧はセーフエリアの内側に置く）。
+      Color.black.ignoresSafeArea(.container, edges: .bottom)
       content(chat)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)

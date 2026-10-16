@@ -17,7 +17,7 @@ final class ChatModel {
   private(set) var store: ChatStore?
   /// 表示の末尾（`store.window(endIndex:)` が表示する範囲）。
   private(set) var endIndex = 0
-  /// 診断シートに出す、直近の読み込みの要約。
+  /// 設定の診断に出す、直近の読み込みの要約。
   private(set) var loadSummary: String?
 
   /// 古い読み込みの結果を捨てるための世代。動画の切り替えや再読み込みで進める。
