@@ -43,6 +43,9 @@ final class PlayerModel {
   @ObservationIgnored private var isSeekable = false
   @ObservationIgnored private var hasReachedEnd = false
   @ObservationIgnored private var recordTask: Task<Void, Never>?
+  /// 直近の映像トラックの要約（コーデック・解像度・fps）。PiPが使える動画と使えない動画を、映像の特性で
+  /// 突き合わせるための暫定の診断（Issue #12 第1段階）。原因と対策が決まったら、配線ごと消す。
+  @ObservationIgnored private var videoSummary = "-"
   @ObservationIgnored private var clock = PlaybackClock()
   @ObservationIgnored private var currentFile: ScopedFile?
   @ObservationIgnored private var pipTask: Task<Void, Never>?
@@ -132,6 +135,7 @@ final class PlayerModel {
     currentIdentity = file.fileSizeBytes.map { VideoIdentity(fileName: url.lastPathComponent, size: Int64($0)) }
     savedPosition = currentIdentity.flatMap { resumeLookup?($0) }
     restoreCompleted = savedPosition == nil
+    videoSummary = "-"
     playingSince = nil
     isSeekable = false
     hasReachedEnd = false
@@ -253,8 +257,31 @@ final class PlayerModel {
     currentIdentity = nil
     savedPosition = nil
     restoreCompleted = true
+    videoSummary = "-"
     syncClockState()
     remote?.update(nil)
+  }
+
+  /// 映像トラックの要約を求め、前回と違えばログに残す。
+  /// `.tracksChanged`／`.voutChanged` を受けた時点で、SwiftVLC内部の `videoTracks` が更新済みとは限らない
+  /// （`play(url:)` は一度空にする）ので、読む直前に `refreshTracks()` で読み直す。
+  private func refreshVideoSummary(trigger: String) {
+    guard let player else { return }
+    player.refreshTracks()
+    let tracks = player.videoTracks
+    let summary =
+      tracks.isEmpty
+      ? "なし"
+      : tracks.map { track in
+        let codec = track.codecString ?? "?"
+        let width = track.width.map(String.init) ?? "?"
+        let height = track.height.map(String.init) ?? "?"
+        let fps = track.frameRate.map { String(format: "%.2f", $0) } ?? "?"
+        return "\(track.isSelected ? "*" : "")\(codec) \(width)x\(height) \(fps)fps"
+      }.joined(separator: " / ")
+    guard summary != videoSummary else { return }
+    videoSummary = summary
+    AppLog.write("映像 トラック \(summary) 契機=\(trigger)")
   }
 
   // MARK: - 再生位置の記憶
@@ -379,7 +406,8 @@ final class PlayerModel {
         guard let self, let controller else { return }
         if controller.isPossible != last {
           last = controller.isPossible
-          AppLog.write("PiP可 変化 isPossible=\(controller.isPossible) \(self.stateDescription)")
+          AppLog.write(
+            "PiP可 変化 isPossible=\(controller.isPossible) \(self.stateDescription) 映像=\(self.videoSummary)")
         }
       }
     }
@@ -425,7 +453,8 @@ final class PlayerModel {
     // 既定の events は .newest(64) で取りこぼし得るので、必要な種類だけを通す unbounded にする。
     let envelopes = player.eventEnvelopes(policy: .unbounded) { envelope in
       switch envelope.event {
-      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError, .seekableChanged, .endReached: true
+      case .timeChanged, .lengthChanged, .voutChanged, .encounteredError, .seekableChanged, .endReached,
+        .tracksChanged: true
       default: false
       }
     }
@@ -471,6 +500,10 @@ final class PlayerModel {
       onEnded?(currentIdentity)
     case .voutChanged(let count):
       AppLog.write("voutChanged \(count)")
+      if count > 0 { refreshVideoSummary(trigger: "voutChanged") }
+    case .tracksChanged:
+      // 音声の選択変更（`restartAudioOutput()` など）でも届くが、同じ要約はログに出ない。
+      refreshVideoSummary(trigger: "tracksChanged")
     case .encounteredError:
       diagnostics.reportError("encounteredError")
     default:
