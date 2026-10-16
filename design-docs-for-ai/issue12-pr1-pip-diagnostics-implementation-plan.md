@@ -22,21 +22,23 @@ PRは `Refs #12`（`Closes` にしない。第2段階が残る）。
 | `PiPController.isPossible` は、AVKitの `AVPictureInPictureController.isPictureInPicturePossible` を写した値。偽の理由はアプリのログに出ない | SwiftVLC v1.1.0-beta.14 `Sources/SwiftVLC/PiP/PiPController.swift` の `updatePiPPossible` |
 | `Player.videoTracks: [Track]`（`public internal(set) var`）が取れる。`Track` に `codecString: String?`（FourCC）、`width: Int?`、`height: Int?`、`frameRate: Double?`、`isSelected: Bool`、`bitrate: Int` がある | SwiftVLC `Sources/SwiftVLC/Player/Player.swift`（107行）、`Sources/SwiftVLC/Media/Track.swift` |
 | `PlayerEvent.tracksChanged`（引数なし）がある。SwiftVLCの内部は、このイベントの処理で `videoTracks` を更新する。**アプリが同じイベントを受けた時点で、`videoTracks` が更新済みかは保証されない**（内部の更新とイベント配送の順序は不定） | SwiftVLC `Player+Events.swift`（`.tracksChanged` の処理）、`PlayerEvent.swift` |
+| **`Player.refreshTracks()` が公開APIで、ドキュメントに「`.tracksChanged`／`.mediaChanged` を受けても配列が更新済みとは限らない。その場で読みたいなら、イベントの後にこのメソッドを呼ぶ」とある**。`play(url:)` は `videoTracks` を空にしない（空にするのは `refreshTracks` の中だけ）ので、更新前に読むと**前の動画のトラック**を返す。SwiftVLC内部も `.voutChanged`・`.mediaChanged` の処理で `refreshTracks` を呼ぶが、アプリ側の処理より先に終わる保証はない | SwiftVLC `Player+Tracks.swift`（98〜118行）、`Player+Events.swift`（592・710〜732行付近） |
 | 現在、`PlayerModel.startObserving()`（423行付近）のイベントの絞り込みに `.tracksChanged` は無い。`.voutChanged` は通る | `App/Player/PlayerModel.swift` |
 
 ## 2. 変更内容
 
 変更するファイルは `App/Player/PlayerModel.swift` のみ。
 
-1. **状態を足す**：`@ObservationIgnored private(set) var videoSummary = "-"`（直近の映像トラックの要約。`PiP可 変化` のログに添える）。
+1. **状態を足す**：`@ObservationIgnored private var videoSummary = "-"`（直近の映像トラックの要約。`PiP可 変化` のログに添える）。
 2. **要約の関数を足す**：`private func refreshVideoSummary(trigger: String)`。
-   - `player.videoTracks` から文字列を作る。トラックごとに `"\(codecString ?? "?") \(width)x\(height) \(fps)fps"`（`width`・`height` が `nil` なら `?`。`fps` は `frameRate` を `String(format: "%.2f", …)`、`nil` なら `?`）。選択中のトラック（`isSelected`）には先頭に `*` を付ける。複数あれば ` / ` で連結。トラックが0本なら `"なし"`。
-   - 前回と同じ文字列なら何もしない（重複ログを出さない）。違えば `videoSummary` を更新し、`AppLog.write("映像 トラック \(summary) 契機=\(trigger)")`。
+   - **`player.videoTracks` を読む直前に `player.refreshTracks()` を呼ぶ**（上の表。古い動画のトラックを読まないため）。副作用はトラックまわりのObservationが無効化されることだけで、アプリでトラックを使うのは `restartAudioOutput()` だけ（画面から監視していない）ので影響しない。
+   - トラックごとに `"\(codec) \(w)x\(h) \(fps)fps"` を作る。`codec = track.codecString ?? "?"`、`w = track.width.map(String.init) ?? "?"`、`h` も同様、`fps = track.frameRate.map { String(format: "%.2f", $0) } ?? "?"`（Optionalを文字列に直接埋め込まない）。選択中のトラック（`isSelected`）には先頭に `*` を付ける。複数あれば ` / ` で連結。トラックが0本なら `"なし"`。
+   - **`videoSummary` 自体を前回値として使う**（変数は1つ）。前回と同じ文字列なら何もしない（重複ログを出さない）。違えば `videoSummary` を更新し、`AppLog.write("映像 トラック \(summary) 契機=\(trigger)")`。
 3. **呼ぶ契機**：
-   - `handle(_:)` の `.voutChanged(let count)`（472行付近）で、`count > 0` のとき `refreshVideoSummary(trigger: "voutChanged")`。トラックの確定後に映像出力が始まるため、更新が済んでいる可能性が高い。
+   - `handle(_:)` の `.voutChanged(let count)`（472行付近）で、`count > 0` のとき `refreshVideoSummary(trigger: "voutChanged")`。トラックの確定後に映像出力が始まるため、`refreshTracks()` を呼ぶので、順序によらず現在の値を読める。
    - イベントの絞り込み（428行付近）に `.tracksChanged` を足し、`handle(_:)` に `case .tracksChanged: refreshVideoSummary(trigger: "tracksChanged")` を足す。
-   - 2つの契機のどちらでも、更新が済んでいない（古い要約になる）可能性があるので、**2つとも入れる**。同じ文字列は重複しないので、後から更新された値だけがログに出る。
-4. **動画を開くとき**：`open(url:)` の成功時の初期化（`currentIdentity = …` の付近、132行）で `videoSummary = "-"` と、重複判定用の前回値の消去を行う（前の動画の要約が、新しい動画のログに混ざらないようにする）。失敗した経路と `resetAfterDetach()`（247行）でも同じく消す。
+   - 2つの契機を入れるのは、どちらか一方で `refreshTracks()` の時点にまだトラックが確定していない（0本など）場合に、もう一方で拾うため。同じ文字列は重複しないので、確定した値だけがログに出る。
+4. **動画を開くとき**：`open(url:)` の成功時の初期化（`currentIdentity = …` の付近、132行）で `videoSummary = "-"` に戻す（同じ要約でも新しい動画では必ず1回ログに出る）。失敗経路は、**`play(url:)` の失敗で古い動画が外れたときに呼ぶ `resetAfterDetach()`（247行）でだけ**消す。対応していない形式・音声セッションの失敗は「再生中の動画はそのまま」なので、消さない。
 5. **`PiP可 変化` のログに添える**（382行）：`… \(self.stateDescription) 映像=\(self.videoSummary)`。
 6. **コメント**：`videoSummary` の宣言に、**なぜ残すか**（PiPが使える動画・使えない動画を、コーデック・解像度で突き合わせるため。Issue #12 の第1段階）と、原因の対策が決まったら配線ごと消す暫定の診断であることを書く（00 項目27）。
 
@@ -44,7 +46,7 @@ PRは `Refs #12`（`Closes` にしない。第2段階が残る）。
 
 | 判断 | 採用案と理由 | 採らなかった案 |
 |---|---|---|
-| 契機を `voutChanged` と `tracksChanged` の2つにする | `videoTracks` の更新とイベント配送の順序が保証されないため。同じ文字列は出さないので、重複しない | `tracksChanged` だけ（古い値を読む恐れ）。`Task.sleep` で待ってから読む（根拠のない待ち時間） |
+| 読む直前に `refreshTracks()` を呼ぶ。契機は `voutChanged` と `tracksChanged` の2つ | 更新と配送の順序が保証されないので、公開APIで読み直す。契機を2つにするのは、確定前に呼んだ場合の取りこぼしを避けるため | 契機だけに頼る（前の動画のトラックを読む）。`Task.sleep` で待つ（根拠のない待ち時間） |
 | 要約を `PiP可 変化` のログに添える | ログの突き合わせを1行で済ませるため（`選択` 行と時刻で探し合わなくてよい） | 別の行を探して突き合わせる（手間が増え、ミスしやすい） |
 | 診断シートに表示を足さない | スコープ外。ログで足りる | 診断シートの行を足す |
 | 単体テストを書かない | 文字列の組み立てだけで、SwiftVLCの `Track` はアプリ側の型で、`VLCChatCore` に出せる規則が無い | `Track` を写す型をCoreに作る（ログ1行のために型を増やす過剰設計） |
@@ -61,4 +63,4 @@ PRは `Refs #12`（`Closes` にしない。第2段階が残る）。
 
 ## 5. リスク
 
-- `videoTracks` の更新が遅く、どちらの契機でも古い値（空）になると、`映像 トラック なし` と出る。そのときは、契機に `.lengthChanged` を足すか、PiPのボタンを押したときにも読む（`PiP toggle` のログに添える）ことを検討する。
+- `refreshTracks()` を呼んでも、契機の時点でトラックが確定していなければ `映像 トラック なし` と出る。そのときは、契機に `.lengthChanged` を足すか、PiPのボタンを押したときにも読む（`PiP toggle` のログに添える）ことを検討する。
