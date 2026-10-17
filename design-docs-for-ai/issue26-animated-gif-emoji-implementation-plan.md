@@ -90,6 +90,7 @@ PC版 `vlc-chat/publish/VLC-Chat-Replay-win-x64-single-20261006/emoji_cache.sqli
 - `scrollPhase != .idle`: `.tracking`（指が触れた）・`.interacting`・`.decelerating`・`.animating`のどれでも止める。
 - `scenePhase`: `.inactive`（通知センターを引き下げたときなど）でも止める。`.active` だけ動かす。
 - `isCovered`: 設定シート・プレイリストシート・ファイル選択（`.fileImporter`）のどれかが開いている間は真。シートは`scenePhase`を変えないので、`PlayerScreen`の`showsSettings`・`showsPlaylist`・`showsFileImporter`から作る。確認ダイアログ（`.alert`）は小さいので含めない。
+- 長押しの後は、次に触れるまで止める（m4-1の実機確認で追加。R-02）。`textSelection`のメニューは、同じスクロール領域の更新が続くと閉じるので、長押しで指を離した途端に時計が動き出すと、メニューがすぐ閉じる（GIFを含まない行のメニューも同じ）。動かさずに0.45秒以上触れていた（`tracking`→`idle`）後は、次に触れて短く離す、またはスクロールを始めるまで、ゲートを閉じたままにする。判定は`VLCChatCore`の`LongPressHold`（5.15）。副作用として、コピーのメニューを使った後も、次にチャット欄へ触れるまでGIFは止まったままになる。
 - 「視差効果を減らす」（`accessibilityReduceMotion`）と低電力モード（`isLowPowerModeEnabled`）は**読まない**（Issueの決定。入力に含めない）。
 - `scrollPhase`が`.animating`になるのは、利用者の操作以外（`proxy.scrollTo`など）でもあり得る。最下部追従中に新着でGIFが途切れて見えるかは、実機で確かめる（8章の手順14）。ただし`ChatPanelView.swift:125-127`の`scrollTo`は`disablesAnimations`付きなので、`.animating`にならない可能性が高い（それも手順14で確かめる）。Issueは「プログラムによる自動スクロール中も止める」と決めているので、途切れて見えても実装者は条件を変えず、実装を止めてユーザーに報告する。
 - 「PiPがアクティブ」は `diagnostics.pipActive`（`PlayerModel.attachPiP` が更新、:420-432）を使う。PiPが始まっても前面のままのとき（アプリ内のPiPボタン）に止めるため、`scenePhase` だけでは足りない。
@@ -318,6 +319,7 @@ final class EmojiAnimationClock {
   `isCovered`は`ChatPanelView`の新しい引数（`let isCovered: Bool`）で、`PlayerScreen`が渡す（5.14）。
 - `body`の修飾子に`.onChange(of: shouldAnimate, initial: true) { app.emojiClock.setGateOpen(shouldAnimate) }`と、`.onDisappear { app.emojiClock.setGateOpen(false) }`を足す（チャット欄が無くなったらゲートを閉じる）。
 - 既存の`.onChange(of: chat.store.map { ObjectIdentifier($0) })`（:40）の中に`scrollPhase = .idle`を足す。チャットが替わって一覧のScrollViewが作り直されても、`scrollPhase`が操作中のまま残ってGIFが止まり続けないようにするため（`.onScrollPhaseChange`は変化があったときしか呼ばれない）。
+- 長押しの判定を足す（D-05）。`@State private var longPressHold = LongPressHold()`を持ち、`.onScrollPhaseChange { oldPhase, newPhase in … }`で、`.tracking`→`touchBegan`、`.interacting`→`scrollBegan`、`.tracking`から`.idle`→`touchEnded`を呼ぶ（時刻は`ProcessInfo.processInfo.systemUptime`）。`shouldAnimate`の`isScrolling`は`scrollPhase != .idle || longPressHold.isHolding`。チャットが替わるとき（上の`onChange`）は`LongPressHold()`に戻す。
 
 ### 5.9 `App/AppModel.swift`（変更）
 
@@ -376,6 +378,21 @@ public struct AnimationRunState: Equatable, Sendable {
 
 - `ChatPanelView(app: app)`（:25）を`ChatPanelView(app: app, isCovered: showsPlaylist || showsSettings || showsFileImporter)`にする（D-05）。`showsPlaylist`・`showsSettings`・`showsFileImporter`は既存の`@State`（:8-11）。
 
+### 5.15 `Packages/VLCChatCore/Sources/VLCChatCore/LongPressHold.swift`（新規）
+
+```swift
+public struct LongPressHold: Equatable, Sendable {
+  public static let threshold: TimeInterval = 0.45
+  public private(set) var isHolding = false   // 長押しの後、まだ次に触れていない
+  public init()
+  public mutating func touchBegan(at now: TimeInterval)   // tracking に入った
+  public mutating func touchEnded(at now: TimeInterval)   // tracking から idle に戻った。threshold 以上なら長押し
+  public mutating func scrollBegan()                      // interacting に入った。止めておくのをやめる
+}
+```
+
+しきい値を0.5秒（システムの長押し認識）より少し短くするのは、認識の時点で`idle`に戻る場合も、離したときに`idle`に戻る場合も拾うため。ゆっくり触れて離した（0.45〜0.5秒）場合も長押し扱いになり、次に触れるまでGIFが止まる（許容する）。
+
 ## 6. テスト方針
 
 テストは`Packages/VLCChatCore/Tests/VLCChatCoreTests/`に置き、既存に合わせてSwift Testing（`import Testing`・`@Test`・`#expect`、`@testable import VLCChatCore`）で書く。
@@ -432,7 +449,18 @@ public struct AnimationRunState: Equatable, Sendable {
 - 復帰: `setGateOpen(true)`、`addDemand()`、`setGateOpen(false)` → `.stop`。`setGateOpen(true)` → `.start`（PiPや背面からの復帰）。
 - ゲートが閉じている間の増減: `addDemand()`、`addDemand()`、`removeDemand()` → すべて`.none`で`demand == 1`。`setGateOpen(true)` → `.start`。
 
-### 6.6 テストに入れないもの
+### 6.6 `LongPressHoldTests.swift`（新規）
+
+時刻は2進で正確に表せる値（0.25・0.5）と、しきい値そのもの（0からの差）で比べる。
+
+- 初期は止めておかない。
+- 10→10.5（0.5秒）で離す → `isHolding`。10→10.25（0.25秒）で離す → 止めておかない。
+- 0→しきい値（0.45秒）で離す → `isHolding`（境界ちょうどは長押し）。
+- 長押しの後に、20→20.25で触れて離す → 止めておくのをやめる。触れている間（`touchBegan`のみ）は止めたまま。
+- 長押しの後に`scrollBegan` → 止めておくのをやめる。
+- `touchBegan`→`scrollBegan`→`touchEnded`は変えない（スクロールの後の`idle`）。`touchEnded`だけを重ねて呼んでも変えない。
+
+### 6.7 テストに入れないもの
 
 - 合成の正しさ（部分フレーム・処分方法）: ImageIOの書き込み側では部分フレームを作れないため、実機で2章の代表GIFを目視する（R-01）。
 - `EmojiStore.makeEmoji`・`ChatRowView`の描画: アプリ本体はテストターゲットが無い。ロジックは`GifSource`・`AnimationTiming`・`EmojiAnimationGate`・`AnimationClockAccumulator`・`AnimationRunState`に寄せてあり、残りは薄い組み立て。
@@ -464,7 +492,7 @@ ipaはGitHub ActionsがReleasesに載せる（`m<M>-<n>`タグ）。PCのiloader
 | 6 | 動画を一時停止する | GIFは動き続ける（4） |
 | 7 | ホームに戻り、PiPを出す。アプリ内のPiPボタンでも試す | PiP・背面のとき、負荷ログが`場面=PiP`／`背面`・`GIF=停止`（3） |
 | 8 | アプリに戻る | 前面に戻ったら再び動く（3） |
-| 9 | 動いているGIFを含む行を長押ししてテキストを選択し、指を離してコピーのメニューが出ている間も見る | 長押しの間にGIFが動いていても止まっていても、選択とメニューが消えず、コピーできる（5、R-02）。止まったかどうかは記録だけにする |
+| 9 | 動いているGIFを含む行を長押しし、指を離してコピーのメニューが出ている間も見る。GIFを含まない行でも同じことをする。メニューを閉じるために、チャット欄を軽くタップする | 指を離した後も、メニューが消えずに出続け、「コピー」できる（5、R-02）。メニューが出ている間はGIFが止まっている。軽くタップしてメニューが消えると、GIFが再び動く。**iOS 26では、長押しのメニューは本文全体を対象にし、部分選択はできない**（Appleの仕様。この変更前からの挙動）ので、部分コピーは確認の対象外 |
 | 10 | GIFを含む行で、URLをタップする。長い行の折り返しを見る | URLが開く。絵文字が行の途中でも自然に折り返す（5） |
 | 11 | PNG・JPEGの絵文字と、1フレームのGIF（実データに1件）を見る | これまでと同じ見た目・同じ高さ。1フレームのGIFは静止画で、`GIF絵文字`のログが出ない（6、D-09） |
 | 12 | 低電力モードをオンにして、GIFを見る | 動く（頻度が下がるのは可）（Issue） |
@@ -473,7 +501,7 @@ ipaはGitHub ActionsがReleasesに載せる（`m<M>-<n>`タグ）。PCのiloader
 | 15 | 端末の「視差効果を減らす」をオンにして、GIFを見る | 動く（設定を読まない。Issue） |
 | 16 | GIF絵文字を含む行の高さと、行の幅を見る | 行がフレームごとにがたつかない（5.6の大きさの固定） |
 | 17 | GIFが動いている状態で、別のチャットに切り替える（指でスクロールしている最中にも試す） | 切り替え後、触れなくてもGIFが動く（5.8の`scrollPhase`の復帰）。負荷ログの`行=`が、見えているGIF行の数と合う（見えていなければ0）。登録の解除漏れが無い（5.7） |
-| 18 | GIFが動いている状態で、動画を閉じてチャット欄を消し、もう一度開く | 閉じている間は`行=0`・`GIF=停止`。開き直すと、見えている行の数に戻る |
+| 18 | GIFが動いている状態で、プレイリストを開き、**1件だけの状態で再生中の項目を削除する**（このアプリに「動画を閉じる」専用の操作は無く、再生中の最後の項目を削除すると動画が閉じてチャット欄が消える。`AppModel.followRemovedCurrent`）。そのあと、動画を選び直して開く | 閉じている間は`行=0`・`GIF=停止`。開き直すと、見えている行の数に戻る |
 | 19 | GIFが動いている状態で、設定から絵文字ライブラリを入れ替える | 入れ替え後、`行=`が見えているGIF行の数と合う（キャッシュの破棄で登録が漏れない） |
 | 20 | 同じGIFが複数の行にあるチャットで、**一度表示してキャッシュ済みのGIF**を使い、1行を出したらスクロールを止めて数秒待ち、次の行を出す、を繰り返す | 別々の時点で見え始めた行は、それぞれ先頭フレームから動き出し、フレームが揃わない。同時に見え始めた行（チャットを開いた直後、スクロールを止めた瞬間）は、揃って動き出してよい（D-12） |
 | 21 | GIFが動いている状態で、設定シートを開き、そのまま40秒以上待ってから閉じる。プレイリストシート・ファイル選択でも同じことをする | 開いていた間の負荷ログが`GIF=停止`で、閉じた後は再び動く（D-05）。ログは、閉じた後に設定を開き直して読む |

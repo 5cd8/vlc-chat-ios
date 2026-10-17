@@ -13,6 +13,9 @@ struct ChatPanelView: View {
   /// （新着を足さず先頭の行も消さないので、見ている行がずれない）。
   @State private var shownEnd = 0
   @State private var scrollPhase: ScrollPhase = .idle
+  /// 長押しの後、次に触れるまでGIFのアニメを止めておく判定。`textSelection` のメニューは、同じスクロール領域の
+  /// 更新が続くと閉じてしまうので、メニューが出ている間（長押しで離した後）は動かさない。
+  @State private var longPressHold = LongPressHold()
 
   var body: some View {
     let chat = app.chat
@@ -45,6 +48,7 @@ struct ChatPanelView: View {
       // 一覧のScrollViewは作り直されるので、操作中のまま残った値でGIFが止まり続けないようにする
       // （`onScrollPhaseChange` は変化があったときしか呼ばれない）。
       scrollPhase = .idle
+      longPressHold = LongPressHold()
     }
     // GIF絵文字のアニメは、前面で、PiPでなく、スクロール中でなく、シートに覆われていないときだけ動かす。
     // 動画の一時停止では止めない。実際に回すかは、時計に登録された行があるかとも合わせて時計が決める。
@@ -69,7 +73,7 @@ struct ChatPanelView: View {
   private var shouldAnimate: Bool {
     EmojiAnimationGate.shouldAnimate(
       isForeground: scenePhase == .active, isPiPActive: app.diagnostics.pipActive,
-      isScrolling: scrollPhase != .idle, isCovered: isCovered)
+      isScrolling: scrollPhase != .idle || longPressHold.isHolding, isCovered: isCovered)
   }
 
   /// 1回の更新でこれ以上進んだら、前への大きなシークとみなす（凍結中の自然な新着の蓄積では解かない）。
@@ -133,7 +137,20 @@ struct ChatPanelView: View {
           isAtBottom = false
         }
       }
-      .onScrollPhaseChange { _, newPhase in scrollPhase = newPhase }
+      .onScrollPhaseChange { oldPhase, newPhase in
+        scrollPhase = newPhase
+        let now = ProcessInfo.processInfo.systemUptime
+        switch newPhase {
+        case .tracking:
+          longPressHold.touchBegan(at: now)
+        case .interacting:
+          longPressHold.scrollBegan()
+        case .idle where oldPhase == .tracking:
+          longPressHold.touchEnded(at: now)
+        default:
+          break
+        }
+      }
       .onChange(of: shownEnd) {
         if isAtBottom, shownEnd > 0 {
           // 切り替えにアニメーションは付けない。
