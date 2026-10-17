@@ -90,7 +90,7 @@ PC版 `vlc-chat/publish/VLC-Chat-Replay-win-x64-single-20261006/emoji_cache.sqli
 - `scrollPhase != .idle`: `.tracking`（指が触れた）・`.interacting`・`.decelerating`・`.animating`のどれでも止める。
 - `scenePhase`: `.inactive`（通知センターを引き下げたときなど）でも止める。`.active` だけ動かす。
 - `isCovered`: 設定シート・プレイリストシート・ファイル選択（`.fileImporter`）のどれかが開いている間は真。シートは`scenePhase`を変えないので、`PlayerScreen`の`showsSettings`・`showsPlaylist`・`showsFileImporter`から作る。確認ダイアログ（`.alert`）は小さいので含めない。
-- 長押しの後は、次に触れるまで止める（m4-1の実機確認で追加。R-02）。`textSelection`のメニューは、同じスクロール領域の更新が続くと閉じるので、長押しで指を離した途端に時計が動き出すと、メニューがすぐ閉じる（GIFを含まない行のメニューも同じ）。動かさずに0.45秒以上触れていた（`tracking`→`idle`）後は、次に触れて短く離す、またはスクロールを始めるまで、ゲートを閉じたままにする。判定は`VLCChatCore`の`LongPressHold`（5.15）。副作用として、コピーのメニューを使った後も、次にチャット欄へ触れるまでGIFは止まったままになる。
+- 長押しの後は、次に触れるまで止める（m4-1の実機確認で追加。R-02）。`textSelection`のメニューは指を離した後に出るので、その間にアニメの更新が再開するとすぐ閉じる。長押しが認識（0.45秒）されたら、次に触れるまでゲートを閉じたままにする。判定は`VLCChatCore`の`LongPressHold`（5.15）。**`ScrollPhase`では判定できない**（m4-3の実機ログ: 動かさずに触れ続けても`tracking`にならず、`idle`と`interacting`を行き来するだけ）ので、触れている間は`DragGesture(minimumDistance: 0)`の`@GestureState`、長押しの認識は`LongPressGesture(minimumDuration: 0.45)`を`simultaneousGesture`で取る。触れている間もゲートを閉じる。副作用として、コピーのメニューを使った後も、次にチャット欄へ触れるまでGIFは止まったままになる。
 - 「視差効果を減らす」（`accessibilityReduceMotion`）と低電力モード（`isLowPowerModeEnabled`）は**読まない**（Issueの決定。入力に含めない）。
 - `scrollPhase`が`.animating`になるのは、利用者の操作以外（`proxy.scrollTo`など）でもあり得る。最下部追従中に新着でGIFが途切れて見えるかは、実機で確かめる（8章の手順14）。ただし`ChatPanelView.swift:125-127`の`scrollTo`は`disablesAnimations`付きなので、`.animating`にならない可能性が高い（それも手順14で確かめる）。Issueは「プログラムによる自動スクロール中も止める」と決めているので、途切れて見えても実装者は条件を変えず、実装を止めてユーザーに報告する。
 - 「PiPがアクティブ」は `diagnostics.pipActive`（`PlayerModel.attachPiP` が更新、:420-432）を使う。PiPが始まっても前面のままのとき（アプリ内のPiPボタン）に止めるため、`scenePhase` だけでは足りない。
@@ -319,7 +319,7 @@ final class EmojiAnimationClock {
   `isCovered`は`ChatPanelView`の新しい引数（`let isCovered: Bool`）で、`PlayerScreen`が渡す（5.14）。
 - `body`の修飾子に`.onChange(of: shouldAnimate, initial: true) { app.emojiClock.setGateOpen(shouldAnimate) }`と、`.onDisappear { app.emojiClock.setGateOpen(false) }`を足す（チャット欄が無くなったらゲートを閉じる）。
 - 既存の`.onChange(of: chat.store.map { ObjectIdentifier($0) })`（:40）の中に`scrollPhase = .idle`を足す。チャットが替わって一覧のScrollViewが作り直されても、`scrollPhase`が操作中のまま残ってGIFが止まり続けないようにするため（`.onScrollPhaseChange`は変化があったときしか呼ばれない）。
-- 長押しの判定を足す（D-05）。`@State private var longPressHold = LongPressHold()`を持ち、`.onScrollPhaseChange { oldPhase, newPhase in … }`で、`.tracking`→`touchBegan`、`.interacting`→`scrollBegan`、`.tracking`から`.idle`→`touchEnded`を呼ぶ（時刻は`ProcessInfo.processInfo.systemUptime`）。`shouldAnimate`の`isScrolling`は`scrollPhase != .idle || longPressHold.isHolding`。チャットが替わるとき（上の`onChange`）は`LongPressHold()`に戻す。
+- 長押しの判定を足す（D-05）。`@State private var longPressHold = LongPressHold()`と`@GestureState private var isTouching = false`を持ち、`ScrollView`に`.simultaneousGesture(DragGesture(minimumDistance: 0).updating($isTouching) { _, state, _ in state = true })`と`.simultaneousGesture(LongPressGesture(minimumDuration: 0.45).onEnded { _ in longPressHold.longPressRecognized() })`を付ける。`.onChange(of: isTouching)`で、触れたとき`longPressHold.touchBegan()`を呼ぶ。`shouldAnimate`の`isScrolling`は`scrollPhase != .idle || isTouching || longPressHold.isHolding`。チャットが替わるとき（上の`onChange`）は`LongPressHold()`に戻す。
 
 ### 5.9 `App/AppModel.swift`（変更）
 
@@ -382,16 +382,14 @@ public struct AnimationRunState: Equatable, Sendable {
 
 ```swift
 public struct LongPressHold: Equatable, Sendable {
-  public static let threshold: TimeInterval = 0.45
   public private(set) var isHolding = false   // 長押しの後、まだ次に触れていない
   public init()
-  public mutating func touchBegan(at now: TimeInterval)   // tracking に入った
-  public mutating func touchEnded(at now: TimeInterval)   // tracking から idle に戻った。threshold 以上なら長押し
-  public mutating func scrollBegan()                      // interacting に入った。止めておくのをやめる
+  public mutating func touchBegan()            // 新しく触れた。止めておくのをやめる
+  public mutating func longPressRecognized()   // 長押しが認識された。止めておく
 }
 ```
 
-しきい値を0.5秒（システムの長押し認識）より少し短くするのは、認識の時点で`idle`に戻る場合も、離したときに`idle`に戻る場合も拾うため。ゆっくり触れて離した（0.45〜0.5秒）場合も長押し扱いになり、次に触れるまでGIFが止まる（許容する）。
+指を離したことは通知しない（次に触れるまで`isHolding`は変わらない）。
 
 ## 6. テスト方針
 
@@ -451,14 +449,12 @@ public struct LongPressHold: Equatable, Sendable {
 
 ### 6.6 `LongPressHoldTests.swift`（新規）
 
-時刻は2進で正確に表せる値（0.25・0.5）と、しきい値そのもの（0からの差）で比べる。
+各テストは、新しい`LongPressHold()`から始める。
 
-- 初期は止めておかない。
-- 10→10.5（0.5秒）で離す → `isHolding`。10→10.25（0.25秒）で離す → 止めておかない。
-- 0→しきい値（0.45秒）で離す → `isHolding`（境界ちょうどは長押し）。
-- 長押しの後に、20→20.25で触れて離す → 止めておくのをやめる。触れている間（`touchBegan`のみ）は止めたまま。
-- 長押しの後に`scrollBegan` → 止めておくのをやめる。
-- `touchBegan`→`scrollBegan`→`touchEnded`は変えない（スクロールの後の`idle`）。`touchEnded`だけを重ねて呼んでも変えない。
+- 初期は止めておかない。`touchBegan()`だけでは止めておかない。
+- `touchBegan()`、`longPressRecognized()` → `isHolding`。
+- 続けて何も呼ばなくても`isHolding`のまま（指を離しても通知は無い）。
+- 長押しの後に`touchBegan()` → 止めておくのをやめる。さらに`longPressRecognized()` → また止めておく。
 
 ### 6.7 テストに入れないもの
 

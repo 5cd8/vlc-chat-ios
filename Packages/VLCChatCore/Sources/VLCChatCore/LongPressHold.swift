@@ -1,39 +1,24 @@
-import Foundation
-
-/// 長押しの後に、次に触れるまでGIFのアニメを止めておくための判定（Issue #26）。
+/// 長押しの後に、次に触れるまでGIFのアニメを止めておくための状態（Issue #26）。
 ///
-/// SwiftUIの `textSelection` は、同じスクロール領域の中で更新が続くと、選択のメニューを閉じてしまう。
-/// 長押しで出るメニューは指を離した後に出るので、指を離してスクロール状態が `idle` に戻った途端に
-/// アニメが動き出すと、メニューがすぐ閉じる。そこで、動かさずに `threshold` 以上触れていた後は、
-/// 次に触れる（短く触れて離す、またはスクロールを始める）まで止めたままにする。
+/// SwiftUIの `textSelection` のメニューは、指を離した後に出る。その間にアニメの更新が再開すると、
+/// メニューがすぐ閉じてしまう。そこで、長押しが認識されたら、次に触れるまで止めておく。
+/// 次に触れた時点で、前のメニューは（その触れ方で）閉じるので、止めておく理由がなくなる。
+///
+/// スクロール状態（`ScrollPhase`）では判定できない。動かさずに触れ続けても `tracking` にならず、
+/// `idle` から `interacting` に変わるだけで、長押しの認識とも結びつかないため（m4-3 の実機ログ）。
 public struct LongPressHold: Equatable, Sendable {
-  /// これ以上、動かさずに触れていたら長押しとみなす（秒）。システムの長押し認識（0.5秒）より少し短くして、
-  /// 認識の時点で `idle` に戻る場合も、離したときに `idle` に戻る場合も、同じように拾う。
-  public static let threshold: TimeInterval = 0.45
-
   /// 長押しの後、まだ次に触れていない（アニメを止めておく）か。
   public private(set) var isHolding = false
-  private var touchStartedAt: TimeInterval?
 
   public init() {}
 
-  /// 指が触れた（スクロールビューが操作を追い始めた）。
-  public mutating func touchBegan(at now: TimeInterval) {
-    touchStartedAt = now
-  }
-
-  /// 動かさずに操作が終わった（`tracking` から `idle` に戻った）。
-  /// `threshold` 以上触れていたら長押し。そうでなければ（短く触れて離した）止めておかない。
-  /// 触れた時刻が分からないとき（スクロールの後など）は変えない。
-  public mutating func touchEnded(at now: TimeInterval) {
-    guard let start = touchStartedAt else { return }
-    touchStartedAt = nil
-    isHolding = now - start >= Self.threshold
-  }
-
-  /// スクロールが始まった。選択のメニューはスクロールで閉じるので、止めておく理由がなくなる。
-  public mutating func scrollBegan() {
-    touchStartedAt = nil
+  /// 新しく触れた。前の長押しのメニューは、この触れ方で閉じる。
+  public mutating func touchBegan() {
     isHolding = false
+  }
+
+  /// 長押しが認識された（動かさずに、一定時間触れ続けた）。
+  public mutating func longPressRecognized() {
+    isHolding = true
   }
 }
