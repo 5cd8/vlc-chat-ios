@@ -52,7 +52,11 @@ struct ChatPanelView: View {
     }
     // GIF絵文字のアニメは、前面で、PiPでなく、スクロール中でなく、シートに覆われていないときだけ動かす。
     // 動画の一時停止では止めない。実際に回すかは、時計に登録された行があるかとも合わせて時計が決める。
-    .onChange(of: shouldAnimate, initial: true) { app.emojiClock.setGateOpen(shouldAnimate) }
+    .onChange(of: shouldAnimate, initial: true) {
+      // 暫定: 手順9（長押しのメニューが閉じる）の原因調査用。原因が分かったら、PRの前に消す。
+      AppLog.write("暫定 GIFゲート \(shouldAnimate ? "開" : "閉") 長押し待機=\(longPressHold.isHolding)")
+      app.emojiClock.setGateOpen(shouldAnimate)
+    }
     .onDisappear { app.emojiClock.setGateOpen(false) }
     // 背面では画面が見えないので回さない。停止中（再生が終わった後など）は位置が0に戻るので更新を飛ばし、
     // 最後の表示を残す。ループ自体は止めない（`id` は scenePhase だけなので、止めると再開しない）。
@@ -140,6 +144,10 @@ struct ChatPanelView: View {
       .onScrollPhaseChange { oldPhase, newPhase in
         scrollPhase = newPhase
         let now = ProcessInfo.processInfo.systemUptime
+        defer {
+          // 暫定: 手順9の原因調査用。原因が分かったら、PRの前に消す。
+          AppLog.write("暫定 スクロール相 \(oldPhase)→\(newPhase) 長押し待機=\(longPressHold.isHolding)")
+        }
         switch newPhase {
         case .tracking:
           longPressHold.touchBegan(at: now)
