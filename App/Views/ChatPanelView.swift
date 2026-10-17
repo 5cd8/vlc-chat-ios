@@ -57,15 +57,9 @@ struct ChatPanelView: View {
     }
     // GIF絵文字のアニメは、前面で、PiPでなく、スクロール中でなく、シートに覆われていないときだけ動かす。
     // 動画の一時停止では止めない。実際に回すかは、時計に登録された行があるかとも合わせて時計が決める。
-    .onChange(of: shouldAnimate, initial: true) {
-      // 暫定: 手順9（長押しのメニューが閉じる）の原因調査用。原因が分かったら、PRの前に消す。
-      AppLog.write("暫定 GIFゲート \(shouldAnimate ? "開" : "閉") 長押し待機=\(longPressHold.isHolding)")
-      app.emojiClock.setGateOpen(shouldAnimate)
-    }
+    .onChange(of: shouldAnimate, initial: true) { app.emojiClock.setGateOpen(shouldAnimate) }
     .onDisappear { app.emojiClock.setGateOpen(false) }
     .onChange(of: isTouching) { _, touching in
-      // 暫定: 手順9の原因調査用。原因が分かったら、PRの前に消す。
-      AppLog.write("暫定 タッチ \(touching ? "開始" : "終了") 長押し待機=\(longPressHold.isHolding)")
       if touching { longPressHold.touchBegan() }
     }
     // 背面では画面が見えないので回さない。停止中（再生が終わった後など）は位置が0に戻るので更新を飛ばし、
@@ -151,19 +145,11 @@ struct ChatPanelView: View {
           isAtBottom = false
         }
       }
-      .onScrollPhaseChange { oldPhase, newPhase in
-        scrollPhase = newPhase
-        // 暫定: 手順9の原因調査用。原因が分かったら、PRの前に消す。
-        AppLog.write("暫定 スクロール相 \(oldPhase)→\(newPhase)")
-      }
+      .onScrollPhaseChange { _, newPhase in scrollPhase = newPhase }
       // 触れている間と、長押しの認識を、スクロール状態とは別に取る（どちらもスクロールを邪魔しない同時認識）。
       .simultaneousGesture(DragGesture(minimumDistance: 0).updating($isTouching) { _, state, _ in state = true })
       .simultaneousGesture(
-        LongPressGesture(minimumDuration: Self.longPressSeconds).onEnded { _ in
-          // 暫定: 手順9の原因調査用。原因が分かったら、PRの前に消す。
-          AppLog.write("暫定 長押し認識")
-          longPressHold.longPressRecognized()
-        })
+        LongPressGesture(minimumDuration: Self.longPressSeconds).onEnded { _ in longPressHold.longPressRecognized() })
       .onChange(of: shownEnd) {
         if isAtBottom, shownEnd > 0 {
           // 切り替えにアニメーションは付けない。
