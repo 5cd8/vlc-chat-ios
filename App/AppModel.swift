@@ -21,6 +21,7 @@ final class AppModel {
   let remote: RemoteControlController
   let chat = ChatModel()
   let emoji = EmojiStore()
+  let emojiClock = EmojiAnimationClock()
   let playlist = PlaylistModel()
   let resume = ResumeModel()
   let settings = SettingsModel()
@@ -71,6 +72,9 @@ final class AppModel {
     playback.onEarlyAdvance = { [relay] identity in relay.model?.handleEarlyAdvance(identity) }
     playback.navigationState = { [playlist] in
       (canGoPrevious: playlist.playlist.hasPrevious, canGoNext: playlist.playlist.hasNext)
+    }
+    diagnostics.animationStateText = { [emojiClock] in
+      "GIF=\(emojiClock.isRunning ? "動作中" : "停止")(行=\(emojiClock.demandCount))"
     }
 
     let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"

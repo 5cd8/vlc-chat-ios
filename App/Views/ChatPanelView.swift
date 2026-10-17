@@ -4,6 +4,8 @@ import VLCChatCore
 /// 動画の下のチャット欄。読み込みの状態に応じて表示を切り替え、読み込めたら再生位置までの最新200件を出す。
 struct ChatPanelView: View {
   let app: AppModel
+  /// 設定・プレイリスト・ファイル選択のシートが、チャット欄を覆っているか（`PlayerScreen` が渡す）。
+  let isCovered: Bool
   @Environment(\.scenePhase) private var scenePhase
   /// 一覧の最下部が見えているか。利用者が上へ遡ったときだけ偽になる。
   @State private var isAtBottom = true
@@ -40,7 +42,14 @@ struct ChatPanelView: View {
     .onChange(of: chat.store.map { ObjectIdentifier($0) }) {
       isAtBottom = true
       shownEnd = chat.endIndex
+      // 一覧のScrollViewは作り直されるので、操作中のまま残った値でGIFが止まり続けないようにする
+      // （`onScrollPhaseChange` は変化があったときしか呼ばれない）。
+      scrollPhase = .idle
     }
+    // GIF絵文字のアニメは、前面で、PiPでなく、スクロール中でなく、シートに覆われていないときだけ動かす。
+    // 動画の一時停止では止めない。実際に回すかは、時計に登録された行があるかとも合わせて時計が決める。
+    .onChange(of: shouldAnimate, initial: true) { app.emojiClock.setGateOpen(shouldAnimate) }
+    .onDisappear { app.emojiClock.setGateOpen(false) }
     // 背面では画面が見えないので回さない。停止中（再生が終わった後など）は位置が0に戻るので更新を飛ばし、
     // 最後の表示を残す。ループ自体は止めない（`id` は scenePhase だけなので、止めると再開しない）。
     .task(id: scenePhase) {
@@ -55,6 +64,12 @@ struct ChatPanelView: View {
         try? await Task.sleep(for: .milliseconds(250))
       }
     }
+  }
+
+  private var shouldAnimate: Bool {
+    EmojiAnimationGate.shouldAnimate(
+      isForeground: scenePhase == .active, isPiPActive: app.diagnostics.pipActive,
+      isScrolling: scrollPhase != .idle, isCovered: isCovered)
   }
 
   /// 1回の更新でこれ以上進んだら、前への大きなシークとみなす（凍結中の自然な新着の蓄積では解かない）。
@@ -97,7 +112,7 @@ struct ChatPanelView: View {
       ScrollView {
         LazyVStack(spacing: 6) {
           ForEach(range, id: \.self) { position in
-            ChatRowView(message: store.message(at: position), emoji: app.emoji)
+            ChatRowView(message: store.message(at: position), emoji: app.emoji, clock: app.emojiClock)
               .id(position)
           }
         }

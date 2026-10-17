@@ -16,6 +16,8 @@ final class DiagnosticsModel {
   var scenePhaseName = "active"
   /// 負荷のログに添える再生状態。`PlayerModel` が結ぶ。
   @ObservationIgnored var playbackStateText: @MainActor () -> String = { "-" }
+  /// 負荷のログに添えるGIF絵文字のアニメの状態（動作中／停止と、動かす行の数）。`AppModel` が結ぶ。
+  @ObservationIgnored var animationStateText: @MainActor () -> String = { "GIF=-" }
   /// 「build … / SwiftVLC … / libVLC …」。`AppModel` が起動時に作って渡す。
   var versionText = "—"
 
@@ -95,7 +97,10 @@ final class DiagnosticsModel {
     @unknown default: thermal = "不明"
     }
     let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled ? " 低電力モード" : ""
-    AppLog.write(String(format: "負荷 CPU=%.0f%% 熱=%@%@ 場面=%@ %@", percent, thermal, lowPower, scene, playbackStateText()))
+    AppLog.write(
+      String(
+        format: "負荷 CPU=%.0f%% 熱=%@%@ 場面=%@ %@ %@", percent, thermal, lowPower, scene, playbackStateText(),
+        animationStateText()))
   }
 
   private func writePeriodicLog() {

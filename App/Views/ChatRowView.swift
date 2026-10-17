@@ -34,6 +34,16 @@ enum ChatStyle {
 struct ChatRowView: View {
   let message: ChatMessage
   let emoji: EmojiStore
+  let clock: EmojiAnimationClock
+  /// 行が画面内にスクロールされて見えているか（`onScrollVisibilityChange`）。
+  @State private var isVisible = false
+  /// 行がビューとして出ている間だけ真（`onAppear`〜`onDisappear`）。`LazyVStack` が画面外の行を保持していても、
+  /// 出ていない行は時計に登録しない。
+  @State private var isAppeared = false
+  /// 時計に登録済みか。真の間だけ `addDemand` 済みで、解除と必ず対になる。
+  @State private var isRegistered = false
+  /// 登録した時点の時計の値。GIFは、ここからの経過で先頭フレームから動く（行ごとに独立して動かす）。
+  @State private var startTime: TimeInterval = 0
 
   var body: some View {
     let role = message.role
@@ -60,6 +70,36 @@ struct ChatRowView: View {
     .clipShape(RoundedRectangle(cornerRadius: 8))
     // 長押しで選択・コピーできる。リンクのタップが効かなくなる場合は、ここを外す（リンクを優先する）。
     .textSelection(.enabled)
+    .onScrollVisibilityChange(threshold: 0.1) { isVisible = $0 }
+    // 登録は `onChange` の1本。`isAppeared` が変われば `needsClock` も変わるので、`onAppear` で登録を呼ばない。
+    .onAppear { isAppeared = true }
+    .onDisappear {
+      isAppeared = false
+      isVisible = false  // 古い可視の値を残さない（再表示で、画面外のまま登録されないように）
+      syncClockDemand(false)  // 行が消えると `onChange` が届かないことがあるので、ここで直接解除する
+    }
+    .onChange(of: needsClock, initial: true) { _, needs in syncClockDemand(needs) }
+  }
+
+  /// 画面に出ていて、見えていて、アニメーション絵文字を含む行は、時計に登録する。
+  /// 登録がある間だけ時計が回る（`EmojiAnimationClock`）。
+  private var needsClock: Bool {
+    isAppeared && isVisible
+      && message.runs.contains { run in
+        if case .emoji(let url, _) = run { return emoji.isAnimated(url: url) }
+        return false
+      }
+  }
+
+  private func syncClockDemand(_ needs: Bool) {
+    guard needs != isRegistered else { return }
+    isRegistered = needs
+    if needs {
+      startTime = clock.time
+      clock.addDemand()
+    } else {
+      clock.removeDemand()
+    }
   }
 
   /// 本文を、テキスト・リンク・絵文字の画像を並べた1つの `Text` にする（折り返しはテキストと一緒になる）。
@@ -82,6 +122,10 @@ struct ChatRowView: View {
       case .emoji(let url, let alt):
         switch emoji.lookup(url: url) {
         case .image(let image):
+          result = result + Text(Image(uiImage: image))
+        case .animated(let animated):
+          // 時計を読むのは、登録済みの行だけ。それ以外の行は、時計が進んでも再描画されない。
+          let image = isRegistered ? animated.frame(at: max(0, clock.time - startTime)) : animated.frames[0]
           result = result + Text(Image(uiImage: image))
         case .pending:
           // 読み込み中は幅だけを確保して、行の高さが後から変わりにくくする。

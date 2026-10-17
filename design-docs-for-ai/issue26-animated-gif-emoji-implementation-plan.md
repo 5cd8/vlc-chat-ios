@@ -277,10 +277,7 @@ final class EmojiAnimationClock {
     }
   }
   // 最外側の修飾子に足す
-  .onAppear {
-    isAppeared = true
-    syncClockDemand(needsClock)   // `onChange` は値が変わらないと届かないので、ここでも合わせる
-  }
+  .onAppear { isAppeared = true }   // `isAppeared`が変われば`needsClock`も変わり、`onChange`が登録する
   .onDisappear {
     isAppeared = false
     isVisible = false             // 古い可視の値を残さない（再表示で、画面外のまま登録されないように）
@@ -299,7 +296,7 @@ final class EmojiAnimationClock {
     }
   }
   ```
-  登録は`onChange`と`onAppear`の2経路だが、どちらも`isAppeared`が真の間にしか起きない（`LazyVStack`が画面外の行を保持していても、`onDisappear`の後は登録されない）。解除は`onChange`と`onDisappear`の2経路。どれも`syncClockDemand`を通り、`isRegistered`が真の間だけ`addDemand`済みなので、登録と解除は必ず対になり、二重にならない（`syncClockDemand`は同じ値なら何もしない）。
+  登録は`onChange`の1本だけで、`isAppeared`が真の間にしか起きない（`onAppear`は`isAppeared`を真にするだけで、登録は呼ばない。状態の更新は`onAppear`の中ではまだ反映されず、古い値を読むため）（`LazyVStack`が画面外の行を保持していても、`onDisappear`の後は登録されない）。解除は`onChange`と`onDisappear`の2経路。どれも`syncClockDemand`を通り、`isRegistered`が真の間だけ`addDemand`済みなので、登録と解除は必ず対になり、二重にならない（`syncClockDemand`は同じ値なら何もしない）。
 - `bodyText` の`switch`に`case .animated(let animated)`を足す:
   ```swift
   let image = isRegistered ? animated.frame(at: max(0, clock.time - startTime)) : animated.frames[0]
