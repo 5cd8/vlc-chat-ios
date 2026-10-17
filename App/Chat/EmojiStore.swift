@@ -43,6 +43,9 @@ final class EmojiStore {
   private let library = EmojiLibrary()
   /// 直近の1000種類までを保つ。`NSCache` は厳密なLRUではなく、メモリが逼迫すると捨てることもあるが、
   /// 捨てられても次の表示で読み直すだけなので、近似として許容する。
+  /// GIFの全フレームも同じ1000種類の枠に入れ、GIF専用のメモリ上限は設けない（Issue #26の判断）。
+  /// 1フレームは高さ54px・約12KBで、実データの最大120フレームでも約1.4MB。メモリ不足が実機で出たら、
+  /// フレーム合計の上限を別Issueで検討する。
   private let cache = NSCache<NSString, CachedEmoji>()
   @ObservationIgnored private var missing = Set<String>()
   @ObservationIgnored private var inFlight = Set<String>()

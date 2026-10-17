@@ -124,6 +124,8 @@ struct ChatRowView: View {
         case .image(let image):
           result = result + Text(Image(uiImage: image))
         case .animated(let animated):
+          // アニメも、静止画と同じく `Text(Image)` で本文に連結したまま、フレームだけ差し替える。絵文字を別のViewに
+          // 並べると、行の途中での折り返し・長押しのコピー・URLのタップが崩れる（Issue #26）。
           // 時計を読むのは、登録済みの行だけ。それ以外の行は、時計が進んでも再描画されない。
           let image = isRegistered ? animated.frame(at: max(0, clock.time - startTime)) : animated.frames[0]
           result = result + Text(Image(uiImage: image))

@@ -40,6 +40,8 @@ public struct GifSource {
   }
 
   /// 範囲外の添字は nil。デコード結果を `CGImageSource` に溜めさせない。
+  /// 部分フレームや処分方法（直前に戻す等）を持つGIFも、ImageIO が合成した全体の画像で返ると、
+  /// 実機で確かめた（Issue #26。自前で合成する必要は無い）。
   public func frame(at index: Int) -> CGImage? {
     guard index >= 0, index < frameCount else { return nil }
     return CGImageSourceCreateImageAtIndex(source, index, [kCGImageSourceShouldCache: false] as CFDictionary)
