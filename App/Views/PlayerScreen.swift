@@ -22,7 +22,7 @@ struct PlayerScreen: View {
           onShowSettings: { showsSettings = true },
           onPrevious: { app.previousItem() },
           onNext: { app.nextItem() })
-        ChatPanelView(app: app)
+        ChatPanelView(app: app, isCovered: showsPlaylist || showsSettings || showsFileImporter)
       } else {
         Spacer(minLength: 0)
       }

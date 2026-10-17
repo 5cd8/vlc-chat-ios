@@ -4,6 +4,8 @@ import VLCChatCore
 /// 動画の下のチャット欄。読み込みの状態に応じて表示を切り替え、読み込めたら再生位置までの最新200件を出す。
 struct ChatPanelView: View {
   let app: AppModel
+  /// 設定・プレイリスト・ファイル選択のシートが、チャット欄を覆っているか（`PlayerScreen` が渡す）。
+  let isCovered: Bool
   @Environment(\.scenePhase) private var scenePhase
   /// 一覧の最下部が見えているか。利用者が上へ遡ったときだけ偽になる。
   @State private var isAtBottom = true
@@ -11,6 +13,14 @@ struct ChatPanelView: View {
   /// （新着を足さず先頭の行も消さないので、見ている行がずれない）。
   @State private var shownEnd = 0
   @State private var scrollPhase: ScrollPhase = .idle
+  /// 長押しの後、次に触れるまでGIFのアニメを止めておく判定。`textSelection` のメニューは、指を離した後に出る。
+  /// その間にアニメの更新が再開すると閉じてしまうので、長押しが認識されたら、次に触れるまで動かさない。
+  @State private var longPressHold = LongPressHold()
+  /// 指が触れている間だけ真。ジェスチャが終わる・取り消されると自動で偽に戻る。
+  /// `ScrollPhase` は、動かさずに触れ続けても `tracking` にならないので、触れているかの判定には使えない。
+  @GestureState private var isTouching = false
+  /// 長押しとみなす秒数。システムの長押し認識（約0.5秒）より少し短くして、メニューが出る前に止める。
+  private static let longPressSeconds = 0.45
 
   var body: some View {
     let chat = app.chat
@@ -40,6 +50,17 @@ struct ChatPanelView: View {
     .onChange(of: chat.store.map { ObjectIdentifier($0) }) {
       isAtBottom = true
       shownEnd = chat.endIndex
+      // 一覧のScrollViewは作り直されるので、操作中のまま残った値でGIFが止まり続けないようにする
+      // （`onScrollPhaseChange` は変化があったときしか呼ばれない）。
+      scrollPhase = .idle
+      longPressHold = LongPressHold()
+    }
+    // GIF絵文字のアニメは、前面で、PiPでなく、スクロール中でなく、シートに覆われていないときだけ動かす。
+    // 動画の一時停止では止めない。実際に回すかは、時計に登録された行があるかとも合わせて時計が決める。
+    .onChange(of: shouldAnimate, initial: true) { app.emojiClock.setGateOpen(shouldAnimate) }
+    .onDisappear { app.emojiClock.setGateOpen(false) }
+    .onChange(of: isTouching) { _, touching in
+      if touching { longPressHold.touchBegan() }
     }
     // 背面では画面が見えないので回さない。停止中（再生が終わった後など）は位置が0に戻るので更新を飛ばし、
     // 最後の表示を残す。ループ自体は止めない（`id` は scenePhase だけなので、止めると再開しない）。
@@ -55,6 +76,12 @@ struct ChatPanelView: View {
         try? await Task.sleep(for: .milliseconds(250))
       }
     }
+  }
+
+  private var shouldAnimate: Bool {
+    EmojiAnimationGate.shouldAnimate(
+      isForeground: scenePhase == .active, isPiPActive: app.diagnostics.pipActive,
+      isScrolling: scrollPhase != .idle || isTouching || longPressHold.isHolding, isCovered: isCovered)
   }
 
   /// 1回の更新でこれ以上進んだら、前への大きなシークとみなす（凍結中の自然な新着の蓄積では解かない）。
@@ -97,7 +124,7 @@ struct ChatPanelView: View {
       ScrollView {
         LazyVStack(spacing: 6) {
           ForEach(range, id: \.self) { position in
-            ChatRowView(message: store.message(at: position), emoji: app.emoji)
+            ChatRowView(message: store.message(at: position), emoji: app.emoji, clock: app.emojiClock)
               .id(position)
           }
         }
@@ -119,6 +146,10 @@ struct ChatPanelView: View {
         }
       }
       .onScrollPhaseChange { _, newPhase in scrollPhase = newPhase }
+      // 触れている間と、長押しの認識を、スクロール状態とは別に取る（どちらもスクロールを邪魔しない同時認識）。
+      .simultaneousGesture(DragGesture(minimumDistance: 0).updating($isTouching) { _, state, _ in state = true })
+      .simultaneousGesture(
+        LongPressGesture(minimumDuration: Self.longPressSeconds).onEnded { _ in longPressHold.longPressRecognized() })
       .onChange(of: shownEnd) {
         if isAtBottom, shownEnd > 0 {
           // 切り替えにアニメーションは付けない。
